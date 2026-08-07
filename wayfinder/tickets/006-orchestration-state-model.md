@@ -3,7 +3,7 @@ id: "006"
 title: Orchestration and state model
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["001"]
 ---
 
