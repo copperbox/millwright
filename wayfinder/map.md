@@ -53,6 +53,11 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   (tier 2), diffing refs in DynamoDB, emitting events to EventBridge; ~30–90 s detection
   latency, ~$1–3/mo; quorum circuit-breaker for outages. Spawned
   [Polling credential during outages](tickets/011-polling-credential-during-outages.md).
+- [Artifacts and caching](tickets/009-artifacts-and-caching.md) — millwright-owned S3
+  store: declared `produces`/`consumes` (synth-checked, doubles as the job DAG) with
+  run-prefix IAM; GHA-style keyed dependency caches (`hashFiles` keys, restore-key
+  fallback); CodeBuild native cache/artifacts unused; docker layer caching stays
+  job-level in v1.
 - [Secrets management and injection](tickets/008-secrets-injection.md) — SSM
   SecureString + dedicated CMK (SM ARNs as passthrough); explicit per-job secret
   declaration synthesizing least-privilege roles; CodeBuild-native env injection with
@@ -71,6 +76,9 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 - **Notifications & badges** — run-result notifications (Slack/email), status badges.
 - **`SecretFile` construct** — first-class file-shaped secrets (SSH keys, PEMs) instead
   of the v1 write-env-var-to-disk step. Sharpens with the definition API.
+- **`DockerCache` construct** — first-class docker layer caching (buildx + ECR/S3
+  backend) instead of the v1 do-it-in-your-steps approach. Sharpens with the definition
+  API.
 - **Webhook fast-path** — *opportunistic* webhook acceleration layered on top of polling
   (lower latency when GitHub is healthy), never a dependency. Sharpens once polling
   architecture is decided.
