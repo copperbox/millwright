@@ -3,7 +3,7 @@ id: "008"
 title: Secrets management and injection
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["001"]
 ---
 
