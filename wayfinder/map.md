@@ -83,6 +83,15 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   compute escape hatch); cancellation is decider input (Ctrl-C parity); rerun `--failed`
   seeds `reusedFrom` jobs via artifact prefix-copy. Spawned
   [Concurrency semantics](tickets/015-concurrency-semantics.md).
+- [Local execution parity](tickets/007-local-execution-parity.md) — `millwright run`
+  is always local, `dispatch` always cloud; shared pure-library decider + step shim
+  behind Executor/StateSink seams (docker + local JSON vs CodeBuild + DynamoDB);
+  working-tree copy default (`--clean` for commit fidelity); same images via the
+  user's own docker (zero AWS calls; host-native arch); secrets from gitignored env
+  file; artifacts/cache mirror S3 layout locally; `--job` reuses last local
+  artifacts. Prototype: `prototypes/local-runner/SESSION.md`. Radiated
+  publicly-pullable-default-images constraint to
+  [Runner image model](tickets/013-runner-image-model.md).
 - [Repo access auth](tickets/003-repo-access-auth.md) — hybrid: per-deployment GitHub
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling

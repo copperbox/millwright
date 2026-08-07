@@ -50,9 +50,14 @@ Annotations:
   drives job order; `StartBuild` is swapped for `docker run` behind an executor
   interface. Parallel jobs actually run in parallel (bounded by `--parallel N`,
   default = CPU-ish).
-- **Same images.** Each job runs in its declared container image via local docker.
-  `Compute.ARM_SMALL`, `timeout` are *advisory locally* (timeout enforced, size
-  ignored with a one-line note).
+- **Same images, your docker.** Each job runs in its declared container image via
+  local docker. Pull auth and discovery are entirely the local daemon's business —
+  your own `docker login`/credential helpers work, images cache normally, millwright
+  never does registry auth. Multi-arch images resolve **host-native** by default
+  (fast, no qemu); `--platform linux/arm64` opts into the exact cloud arch when
+  debugging arch-specific failures, and a one-line note flags when local arch
+  differs from the cloud default. `Compute.ARM_SMALL` sizing is ignored (noted);
+  `timeout` is enforced.
 - **Same step shim.** Steps report start/end/status/SKIPPED through the same shim,
   writing to a local state file instead of DynamoDB — so the output format and
   SKIPPED semantics match the cloud tail exactly.
@@ -101,8 +106,9 @@ $ millwright run release
 ```
 
 - Same env-var contract as the cloud injection; values come from a gitignored env
-  file. **The local runner has no AWS credentials and makes no AWS calls** — parity
-  stops at the env-var boundary, exactly as the secrets decision radiated.
+  file. **Millwright itself makes zero AWS calls locally** — no SSM, no S3, no
+  DynamoDB; parity stops at the env-var boundary, exactly as the secrets decision
+  radiated. (Image pulls go through your local docker config, not millwright.)
 - Missing secrets fail *before* any job starts, naming what's needed.
 
 ## 5. Ctrl-C is a real cancellation
@@ -156,7 +162,8 @@ $ millwright run db-migrate
 | Definition + synth output | synth at triggering commit | same code, in-process synth | **same model** |
 | Job order / retries / skips | decider Lambda | same decider, in-process | **same code** |
 | Step status + SKIPPED | shim → DynamoDB | same shim → local state file | **same code** |
-| Job environment | CodeBuild + declared image | local docker, same image | **same image** |
+| Job environment | CodeBuild + declared image | local docker, same image (host arch; `--platform` for exact) | **same image** |
+| Image pull/auth | CodeBuild role / image model | user's local docker config | delegated |
 | Source | clean checkout at commit | working tree copy (`--clean` for commit) | ≈, explicit |
 | Secrets | SSM/SM → env vars | secrets.env → env vars | same contract |
 | Artifacts | S3 `<repo>/<run>/<job>/<name>` | `.millwright/runs/<id>/<job>/<name>` | same layout |
