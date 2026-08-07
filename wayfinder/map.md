@@ -42,6 +42,11 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 
 <!-- one line per closed ticket: gist + link -->
 
+- [Polling architecture](tickets/002-polling-architecture.md) — 1-min EventBridge
+  Scheduler → non-VPC Lambda doing protocol-v2 `ls-refs` (tier 1) + ETag'd PR polling
+  (tier 2), diffing refs in DynamoDB, emitting events to EventBridge; ~30–90 s detection
+  latency, ~$1–3/mo; quorum circuit-breaker for outages. Spawned
+  [Polling credential during outages](tickets/011-polling-credential-during-outages.md).
 - [Repo access auth](tickets/003-repo-access-auth.md) — hybrid: per-deployment GitHub
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
