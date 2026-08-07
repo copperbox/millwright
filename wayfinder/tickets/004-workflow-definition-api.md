@@ -3,7 +3,7 @@ id: "004"
 title: Workflow-definition construct API
 type: wayfinder:prototype
 status: open
-assignee: none
+assignee: dan
 blocked-by: []
 ---
 
