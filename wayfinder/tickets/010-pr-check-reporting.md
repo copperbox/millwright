@@ -3,7 +3,7 @@ id: "010"
 title: PR check reporting
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["003"]
 ---
 
