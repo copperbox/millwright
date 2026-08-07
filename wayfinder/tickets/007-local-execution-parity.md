@@ -3,7 +3,7 @@ id: "007"
 title: Local execution parity
 type: wayfinder:prototype
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["004"]
 ---
 
