@@ -74,6 +74,15 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   wait-for-run no-arg default; `runs list/show` with 90d metadata / 30d log retention;
   workflow-scoped run numbers (`ci#142`); `logs --failed` triage and scriptable exit
   codes; `runs rerun` exists, semantics owned by orchestration.
+- [Orchestration and state model](tickets/006-orchestration-state-model.md) — hybrid:
+  Step Functions Standard runs a deployed-once decider loop (dispatch-on-completion,
+  task-token wake on build events; decider reused by the local runner) driving one
+  `StartBuild` per job; DynamoDB single-table is the CLI's source of truth (inverted
+  run-number keys, 90d TTL, partitioned writers incl. in-build step shim); launcher
+  Lambda dedupes + allocates run numbers; synth is the first CodeBuild job (Lambda-
+  compute escape hatch); cancellation is decider input (Ctrl-C parity); rerun `--failed`
+  seeds `reusedFrom` jobs via artifact prefix-copy. Spawned
+  [Concurrency semantics](tickets/015-concurrency-semantics.md).
 - [Repo access auth](tickets/003-repo-access-auth.md) — hybrid: per-deployment GitHub
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
@@ -81,8 +90,9 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 
 ## Not yet specified
 
-- **Concurrency semantics** — queueing, concurrency groups, cancel-superseded-runs.
-  Sharpens once orchestration & state model is decided.
+- **Fail-fast** — opt-in run-level "cancel remaining jobs on first failure". Ruled out
+  of v1 by [Orchestration and state model](tickets/006-orchestration-state-model.md);
+  the cancellation path it would reuse now exists.
 - **GHA YAML importer** — best-effort converter from `.github/workflows` to millwright
   definitions. Deferred convenience; sharpens once the native definition model exists.
 - **Notifications & badges** — run-result notifications (Slack/email), status badges.
@@ -106,3 +116,6 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   never replaces it.
 - **Webhook-dependent triggering** — webhooks share fate with the outages millwright
   exists to route around. (Opportunistic acceleration stays in fog; dependency is out.)
+- **Soft-fail / allow-failure jobs** — excluded from the v1 status algebra by
+  [Orchestration and state model](tickets/006-orchestration-state-model.md); it
+  complicates run-status derivation and PR-check semantics for a niche need.
