@@ -53,6 +53,13 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   (tier 2), diffing refs in DynamoDB, emitting events to EventBridge; ~30–90 s detection
   latency, ~$1–3/mo; quorum circuit-breaker for outages. Spawned
   [Polling credential during outages](tickets/011-polling-credential-during-outages.md).
+- [Workflow-definition construct API](tickets/004-workflow-definition-api.md) —
+  in-repo `millwright/workflows.ts`, synthesized at the triggering commit (branch-
+  testable workflows) with secrets-allowlist + IAM-boundary guardrails;
+  `WorkflowSet`→`Workflow`→`job`; DAG from typed artifacts; ref-pinned typed manual
+  dispatch; sharing via npm, matrices via loops, `skipIf` step guards. Prototype:
+  `prototypes/workflow-api/workflows.ts`. Spawned
+  [Packaging and config surface](tickets/014-packaging-and-config-surface.md).
 - [Artifacts and caching](tickets/009-artifacts-and-caching.md) — millwright-owned S3
   store: declared `produces`/`consumes` (synth-checked, doubles as the job DAG) with
   run-prefix IAM; GHA-style keyed dependency caches (`hashFiles` keys, restore-key
@@ -82,8 +89,6 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 - **Webhook fast-path** — *opportunistic* webhook acceleration layered on top of polling
   (lower latency when GitHub is healthy), never a dependency. Sharpens once polling
   architecture is decided.
-- **Packaging & config surface** — CDK app vs construct library, how a deploying team
-  declares which repos/workflows to watch. Sharpens once the definition model exists.
 
 ## Out of scope
 
