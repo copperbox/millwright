@@ -11,8 +11,12 @@
  */
 
 import {
-  WorkflowSet, Workflow, Compute, Secret, Artifact, Cache, hashFiles, Trigger,
+  WorkflowSet, Workflow, Compute, Secret, Artifact, Cache, hashFiles, Trigger, Step,
 } from '@millwright/workflows';
+
+// Shared workflows are just npm packages — a platform repo publishes constructs,
+// consuming repos install and call them. No reusable-workflow machinery.
+import { standardNodeCi } from '@myorg/millwright-workflows';
 
 const app = new WorkflowSet();
 
@@ -53,6 +57,14 @@ ci.job('integration', {
   steps: ['npm run test:integration -- --dist dist/'],
 });
 
+// Matrices are loops — each job is an independent StartBuild, parallel by default.
+for (const version of ['18', '20', '22']) {
+  ci.job(`test-node${version}`, {
+    image: `public.ecr.aws/docker/library/node:${version}`,
+    steps: ['npm ci', 'npm test'],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 2. Deploy on tag — secrets, privileged docker build
 // ---------------------------------------------------------------------------
@@ -74,12 +86,22 @@ release.job('publish', {
   },
   steps: [
     'npm ci && npm run build',
-    'npm publish',
+    // Runtime idempotency guard: exit-0 condition → step reports SKIPPED (not
+    // failed, not silently passed) and the rest of the job continues. Re-running
+    // this workflow at an old tag skips the already-done publish steps.
+    Step.run('npm publish', {
+      skipIf: 'npm view myapp@$MILLWRIGHT_TAG version',
+    }),
     'docker build -t myapp:$MILLWRIGHT_TAG .',
     'echo "$DOCKERHUB" | docker login -u myorg --password-stdin',
     'docker push myapp:$MILLWRIGHT_TAG',
   ],
 });
+
+// Dispatching at a ref runs the *definition and source at that ref*:
+//   millwright dispatch release --ref v1.4.2
+// deploys v1.4.2 using v1.4.2's own workflow — no special support needed here.
+// Tag-triggered runs get the same pinning automatically.
 
 // ---------------------------------------------------------------------------
 // 3. Manual dispatch with *typed* inputs — impossible in GHA YAML
