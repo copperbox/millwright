@@ -42,6 +42,12 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 
 <!-- one line per closed ticket: gist + link -->
 
+- [Job compute runtime](tickets/001-job-compute-runtime.md) — CodeBuild on-demand EC2
+  (ARM default) as the single v1 runtime: only option with zero idle cost + real
+  docker-in-docker; `StartBuild` overrides, built-in queueing, S3 caching, and live
+  CloudWatch streaming replace most runner plumbing; ~$51/mo at 100x5min runs/day.
+  Later tiering via CodeBuild Lambda compute, not raw Lambda; no Fargate in v1. Spawned
+  [CodeBuild provisioning-latency spike](tickets/012-codebuild-provisioning-latency-spike.md).
 - [Polling architecture](tickets/002-polling-architecture.md) — 1-min EventBridge
   Scheduler → non-VPC Lambda doing protocol-v2 `ls-refs` (tier 1) + ETag'd PR polling
   (tier 2), diffing refs in DynamoDB, emitting events to EventBridge; ~30–90 s detection
@@ -56,8 +62,6 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 
 - **Concurrency semantics** — queueing, concurrency groups, cancel-superseded-runs.
   Sharpens once orchestration & state model is decided.
-- **Runner image / toolchain model** — what environment jobs execute in, custom images,
-  preinstalled toolchains. Sharpens once compute runtime is picked.
 - **GHA YAML importer** — best-effort converter from `.github/workflows` to millwright
   definitions. Deferred convenience; sharpens once the native definition model exists.
 - **Notifications & badges** — run-result notifications (Slack/email), status badges.
