@@ -3,7 +3,7 @@ id: "009"
 title: Artifacts and caching
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["001"]
 ---
 

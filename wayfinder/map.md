@@ -53,6 +53,10 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   (tier 2), diffing refs in DynamoDB, emitting events to EventBridge; ~30–90 s detection
   latency, ~$1–3/mo; quorum circuit-breaker for outages. Spawned
   [Polling credential during outages](tickets/011-polling-credential-during-outages.md).
+- [Secrets management and injection](tickets/008-secrets-injection.md) — SSM
+  SecureString + dedicated CMK (SM ARNs as passthrough); explicit per-job secret
+  declaration synthesizing least-privilege roles; CodeBuild-native env injection with
+  masking; `millwright secrets set` CLI authors values.
 - [Repo access auth](tickets/003-repo-access-auth.md) — hybrid: per-deployment GitHub
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
@@ -65,6 +69,8 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 - **GHA YAML importer** — best-effort converter from `.github/workflows` to millwright
   definitions. Deferred convenience; sharpens once the native definition model exists.
 - **Notifications & badges** — run-result notifications (Slack/email), status badges.
+- **`SecretFile` construct** — first-class file-shaped secrets (SSH keys, PEMs) instead
+  of the v1 write-env-var-to-disk step. Sharpens with the definition API.
 - **Webhook fast-path** — *opportunistic* webhook acceleration layered on top of polling
   (lower latency when GitHub is healthy), never a dependency. Sharpens once polling
   architecture is decided.
