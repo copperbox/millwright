@@ -96,6 +96,12 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
   alive; PAT documented as small-setup fallback.
+- [PR check reporting](tickets/010-pr-check-reporting.md) — per-job check runs
+  (`<workflow> / <job>`; commit statuses in PAT mode, same contexts) reconciled from
+  DynamoDB desired state via Streams + 1-min sweep (outage replay coalesces to
+  latest-state); `millwright / synth` check bridges the pre-synth gap and surfaces
+  synth failures; posted per-commit unconditionally, so reporting never depends on
+  tier-2 PR polling; 7-day abandon horizon; no annotations or re-run button in v1.
 
 ## Not yet specified
 
@@ -115,7 +121,12 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   API.
 - **Webhook fast-path** — *opportunistic* webhook acceleration layered on top of polling
   (lower latency when GitHub is healthy), never a dependency. Sharpens once polling
-  architecture is decided.
+  architecture is decided. Would also carry check-run re-run buttons (requested actions
+  are webhook-only, per [PR check reporting](tickets/010-pr-check-reporting.md)).
+- **Check-run annotations** — file/line annotations on job checks from structured
+  test/lint output (report parsers). Ruled out of v1 by
+  [PR check reporting](tickets/010-pr-check-reporting.md); sharpens if v1 grows
+  built-in test-report parsing.
 
 ## Out of scope
 
