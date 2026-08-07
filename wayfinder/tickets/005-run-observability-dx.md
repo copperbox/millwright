@@ -3,7 +3,7 @@ id: "005"
 title: Run observability DX
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: []
 ---
 
