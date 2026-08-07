@@ -69,6 +69,11 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   SecureString + dedicated CMK (SM ARNs as passthrough); explicit per-job secret
   declaration synthesizing least-privilege roles; CodeBuild-native env injection with
   masking; `millwright secrets set` CLI authors values.
+- [Run observability DX](tickets/005-run-observability-dx.md) — CLI-first, no web UI
+  in v1: `logs -f` interleaved run-level tail (polled GetLogEvents, not Live Tail) with
+  wait-for-run no-arg default; `runs list/show` with 90d metadata / 30d log retention;
+  workflow-scoped run numbers (`ci#142`); `logs --failed` triage and scriptable exit
+  codes; `runs rerun` exists, semantics owned by orchestration.
 - [Repo access auth](tickets/003-repo-access-auth.md) — hybrid: per-deployment GitHub
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
@@ -81,6 +86,9 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 - **GHA YAML importer** — best-effort converter from `.github/workflows` to millwright
   definitions. Deferred convenience; sharpens once the native definition model exists.
 - **Notifications & badges** — run-result notifications (Slack/email), status badges.
+- **Run web UI** — a minimal hosted run/log viewer layered on the CLI's data. Deferred
+  convenience per [Run observability DX](tickets/005-run-observability-dx.md); sharpens
+  once the v1 CLI and state model exist.
 - **`SecretFile` construct** — first-class file-shaped secrets (SSH keys, PEMs) instead
   of the v1 write-env-var-to-disk step. Sharpens with the definition API.
 - **`DockerCache` construct** — first-class docker layer caching (buildx + ECR/S3
