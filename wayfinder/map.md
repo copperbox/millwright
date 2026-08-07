@@ -42,6 +42,11 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 
 <!-- one line per closed ticket: gist + link -->
 
+- [Repo access auth](tickets/003-repo-access-auth.md) — hybrid: per-deployment GitHub
+  App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
+  because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
+  alive; PAT documented as small-setup fallback.
+
 ## Not yet specified
 
 - **Concurrency semantics** — queueing, concurrency groups, cancel-superseded-runs.
