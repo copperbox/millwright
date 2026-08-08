@@ -96,6 +96,13 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   App (manifest-flow setup; API work + check runs) plus per-repo read-only deploy keys,
   because App tokens die ≤1h into an API outage while SSH deploy keys keep git polling
   alive; PAT documented as small-setup fallback.
+- [Polling credential during outages](tickets/011-polling-credential-during-outages.md) —
+  deploy keys always for tier-1 polling (the everyday path is the outage path; App token
+  retreats to REST-only work): pure-JS `ssh2` + reused `ls-refs` parser in the poller;
+  `/meta`-seeded SSM host-key pins with auto-reconcile-on-mismatch; deploy keys a
+  universal invariant (App-vs-PAT is REST-surface only); keys in SSM SecureString under
+  the existing CMK (amends Repo access auth's Secrets Manager line), Ed25519 default.
+  Spawned [SSH ls-refs spike](tickets/016-ssh-ls-refs-spike.md).
 - [PR check reporting](tickets/010-pr-check-reporting.md) — per-job check runs
   (`<workflow> / <job>`; commit statuses in PAT mode, same contexts) reconciled from
   DynamoDB desired state via Streams + 1-min sweep (outage replay coalesces to
