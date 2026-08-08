@@ -106,13 +106,16 @@ EOF
     local label ctype imgkind priv img id
     read -r label ctype imgkind priv <<<"$cfg"
     img=$STANDARD_IMAGE; [ "$imgkind" = custom ] && img=$CUSTOM_IMAGE
+    # --privileged-mode-override is a boolean flag pair in CLI v2, not a valued option
+    local priv_flag="--no-privileged-mode-override"
+    [ "$priv" = true ] && priv_flag="--privileged-mode-override"
     echo "config $label:"
     local ids=()
     for _ in $(seq 1 "$REPS"); do
       id=$(aws codebuild start-build --project-name "$PREFIX" \
         --compute-type-override "$ctype" \
         --image-override "$img" \
-        --privileged-mode-override "$priv" \
+        "$priv_flag" \
         --image-pull-credentials-type-override CODEBUILD \
         --query 'build.id' --output text 2>/tmp/$PREFIX-sberr) \
         || { echo "    start-build FAILED: $(tr -d '\n' </tmp/$PREFIX-sberr)"; continue; }
