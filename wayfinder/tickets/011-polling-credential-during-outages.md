@@ -3,7 +3,7 @@ id: "011"
 title: Polling credential during outages
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: []
 ---
 
