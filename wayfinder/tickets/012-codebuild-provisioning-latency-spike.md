@@ -3,7 +3,7 @@ id: "012"
 title: CodeBuild provisioning-latency spike
 type: wayfinder:task
 status: open
-assignee: none
+assignee: dan
 blocked-by: []
 ---
 
