@@ -109,6 +109,12 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   latest-state); `millwright / synth` check bridges the pre-synth gap and surfaces
   synth failures; posted per-commit unconditionally, so reporting never depends on
   tier-2 PR polling; 7-day abandon horizon; no annotations or re-run button in v1.
+- [CodeBuild provisioning-latency spike](tickets/012-codebuild-provisioning-latency-spike.md) —
+  measured: PROVISIONING is 2–7 s across the whole v1 matrix (ARM small/medium ×
+  standard/custom image × privileged on/off); polling detection (~30–90 s) dominates the
+  push→first-log floor, validating the CodeBuild choice with no Fargate reopen; ARM
+  medium on-demand confirmed; 30–40 s QUEUED bursts under concurrent starts noted as
+  input to [Concurrency semantics](tickets/015-concurrency-semantics.md).
 
 ## Not yet specified
 
