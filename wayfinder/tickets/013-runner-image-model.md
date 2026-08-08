@@ -3,7 +3,7 @@ id: "013"
 title: Runner image model
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["004"]
 ---
 
