@@ -3,7 +3,7 @@ id: "017"
 title: Assemble the v1 spec
 type: wayfinder:task
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["015", "016"]
 ---
 
