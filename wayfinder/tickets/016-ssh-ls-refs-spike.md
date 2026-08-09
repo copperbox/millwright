@@ -3,7 +3,7 @@ id: "016"
 title: SSH ls-refs spike
 type: wayfinder:task
 status: open
-assignee: none
+assignee: dan
 blocked-by: []
 ---
 
