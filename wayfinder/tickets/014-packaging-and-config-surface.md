@@ -3,7 +3,7 @@ id: "014"
 title: Packaging and config surface
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: []
 ---
 
