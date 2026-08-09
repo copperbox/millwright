@@ -135,6 +135,13 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   Enforced by the launcher against a **per-ref registry written by every successful
   synth** — which also fills the previously-unrecorded pre-synth trigger-matching gap
   (amends Orchestration and Workflow-definition).
+- [SSH ls-refs spike](tickets/016-ssh-ls-refs-spike.md) — proven live with pure-JS
+  `ssh2` + read-only deploy key: babeld honors the `GIT_PROTOCOL=version=2` channel
+  env, v2 `ls-refs` + `ref-prefix` returns 67 B vs `git/git`'s 344 KB / 5,282-ref v0
+  advertisement (~5,100x); no-env fallback → v0 ad confirmed; `hostVerifier` exposes
+  the raw host key for 011's SSM pinning. Exchange-sequence reference on the
+  `research/ssh-ls-refs-spike` branch. Unblocks
+  [Assemble the v1 spec](tickets/017-assemble-v1-spec.md).
 - [Runner image model](tickets/013-runner-image-model.md) — any Linux+shell image works
   (static shim injected via S3 secondary source / local mount, never baked in); `image`
   required with job>Workflow>WorkflowSet cascade, no default; millwright publishes no
