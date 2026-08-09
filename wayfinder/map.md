@@ -125,6 +125,16 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   self-registration discovery; discrete guided setup (init → cdk deploy → setup →
   repo add → doctor). Spawned [Assemble the v1 spec](tickets/017-assemble-v1-spec.md)
   as the map's terminus.
+- [Concurrency semantics](tickets/015-concurrency-semantics.md) — opt-in
+  deployment-global concurrency groups (limit 1; keys = static strings + trigger-context
+  tokens ref/workflow/repo/event, `${repo}` for repo-local); `queue` default with a
+  pending-slot-of-one (newest waiting wins), `supersede` opt-in cancels in-flight via
+  the existing cancellation path; dropped runs are CANCELLED `reason: superseded`;
+  uniform gating for all run sources, no bypass (cancel-in-flight is break-glass);
+  local runs don't enforce; CodeBuild account quota surfaced via `doctor`, not managed.
+  Enforced by the launcher against a **per-ref registry written by every successful
+  synth** — which also fills the previously-unrecorded pre-synth trigger-matching gap
+  (amends Orchestration and Workflow-definition).
 - [Runner image model](tickets/013-runner-image-model.md) — any Linux+shell image works
   (static shim injected via S3 secondary source / local mount, never baked in); `image`
   required with job>Workflow>WorkflowSet cascade, no default; millwright publishes no
@@ -156,6 +166,11 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   test/lint output (report parsers). Ruled out of v1 by
   [PR check reporting](tickets/010-pr-check-reporting.md); sharpens if v1 grows
   built-in test-report parsing.
+
+- **Concurrency extensions** — numeric group limits (`limit: n`), full-FIFO queues, a
+  `reject` policy, and a dispatch bypass flag. Deferred by
+  [Concurrency semantics](tickets/015-concurrency-semantics.md); graduate only if real
+  usage demands them (the group item can carry a count without reshaping the API).
 
 ## Out of scope
 
