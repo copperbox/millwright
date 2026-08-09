@@ -142,6 +142,13 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   the raw host key for 011's SSM pinning. Exchange-sequence reference on the
   `research/ssh-ls-refs-spike` branch. Unblocks
   [Assemble the v1 spec](tickets/017-assemble-v1-spec.md).
+- [Assemble the v1 spec](tickets/017-assemble-v1-spec.md) — **destination reached**:
+  the implementable v1 spec compiled from all sixteen resolutions, committed as
+  [`spec/millwright-v1.md`](../spec/millwright-v1.md) and published as
+  [Discussion #1 (AI Spec Council)](https://github.com/copperbox/millwright/discussions/1);
+  seven cross-ticket amendments reconciled later-wins (spec §17), spec-authored fills
+  flagged (§18 — job-role lifecycle is the one needing a build-time design pass). No
+  open tickets remain.
 - [Runner image model](tickets/013-runner-image-model.md) — any Linux+shell image works
   (static shim injected via S3 secondary source / local mount, never baked in); `image`
   required with job>Workflow>WorkflowSet cascade, no default; millwright publishes no

@@ -2,7 +2,7 @@
 id: "017"
 title: Assemble the v1 spec
 type: wayfinder:task
-status: open
+status: closed
 assignee: dan
 blocked-by: ["015", "016"]
 ---
@@ -27,3 +27,31 @@ spec must fold in.
 **Delivery**: publish the finished spec as a GitHub Discussion on this repo under
 the **"AI Spec Council"** category (per Dan, 2026-08-08), in addition to linking
 it from this ticket on resolution.
+
+## Resolution
+
+Assembled 2026-08-09 from the resolutions of tickets 001–016. The spec is
+[`spec/millwright-v1.md`](../../spec/millwright-v1.md) (committed on `main`) and is
+published as GitHub Discussion
+[Millwright v1 — Implementable Specification (#1)](https://github.com/copperbox/millwright/discussions/1)
+under the **AI Spec Council** category, per the delivery instruction.
+
+Structure: framing invariants; component inventory (18 components); packaging &
+config surface; workflow-definition API; run-model schema; polling; orchestration;
+concurrency; data stores & schemas (DynamoDB single-table incl. GROUP/REG/CHECK
+items, SSM config plane, S3 layouts); IAM model; job execution environment;
+artifacts & caching; GitHub integration; local-parity contract; full CLI surface;
+latency/cost table; then two audit sections.
+
+**Contradiction handling** (per this ticket's brief): seven cross-ticket amendments
+were reconciled in favor of the later decision and logged in the spec's §17
+(HTTPS→SSH polling, Secrets Manager→SSM credential storage, key provisioning at
+`repo add`, secrets path folded under the deployment prefix, the per-ref registry,
+native CodeBuild cache dropped, check "queue" as desired-state reconciliation).
+**None rose above small; no unresolved contradictions remain.** Spec-authored fills
+no ticket decided are flagged in §18 — the only one warranting a build-time design
+pass is the **per-run job-role lifecycle** (IAM role quota pressure); the rest are
+naming/completeness fills (cron firing, dispatch transport, item/path names).
+
+This was the map's terminus: with it closed, no open tickets remain and the
+destination is reached.
