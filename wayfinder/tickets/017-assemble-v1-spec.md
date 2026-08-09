@@ -23,3 +23,7 @@ favor of the later decision, flagging anything that isn't small.
 Blocked on [Concurrency semantics](015-concurrency-semantics.md) and
 [SSH ls-refs spike](016-ssh-ls-refs-spike.md) — the last two open decisions the
 spec must fold in.
+
+**Delivery**: publish the finished spec as a GitHub Discussion on this repo under
+the **"AI Spec Council"** category (per Dan, 2026-08-08), in addition to linking
+it from this ticket on resolution.
