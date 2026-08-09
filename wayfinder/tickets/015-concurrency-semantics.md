@@ -3,7 +3,7 @@ id: "015"
 title: Concurrency semantics
 type: wayfinder:grilling
 status: open
-assignee: none
+assignee: dan
 blocked-by: ["006"]
 ---
 
