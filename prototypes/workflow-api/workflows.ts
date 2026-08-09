@@ -32,7 +32,7 @@ const ci = new Workflow(app, 'ci', {
 });
 
 const build = ci.job('build', {
-  image: 'public.ecr.aws/docker/library/node:22',   // runner-image model TBD (#013)
+  image: 'public.ecr.aws/docker/library/node:22',   // required, no default; inheritable from Workflow/WorkflowSet (#013)
   compute: Compute.ARM_SMALL,                       // default; here for visibility
   cache: Cache.keyed({
     key: hashFiles('package-lock.json'),
@@ -74,7 +74,9 @@ const release = new Workflow(app, 'release', {
 });
 
 release.job('publish', {
-  image: 'public.ecr.aws/docker/library/node:22',
+  // Privileged jobs must bring docker in the image (#013): node alone won't do —
+  // this team's Dockerfile layers node 22 onto the official dind image.
+  image: '123456789012.dkr.ecr.us-east-1.amazonaws.com/ci/node22-dind:latest',
   privileged: true,                                 // docker-in-docker for the image build
   timeout: { minutes: 30 },
   secrets: {

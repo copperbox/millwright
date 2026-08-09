@@ -116,6 +116,13 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   medium on-demand confirmed; 30–40 s QUEUED bursts under concurrent starts noted as
   input to [Concurrency semantics](tickets/015-concurrency-semantics.md).
 
+- [Runner image model](tickets/013-runner-image-model.md) — any Linux+shell image works
+  (static shim injected via S3 secondary source / local mount, never baked in); `image`
+  required with job>Workflow>WorkflowSet cascade, no default; millwright publishes no
+  images; image-is-the-toolchain (no setup DSL); string-typed with string-level lints
+  (Docker Hub mirror warning) + auto ECR pull grants; privileged jobs must bring docker,
+  prelude auto-starts dockerd when no socket is live.
+
 ## Not yet specified
 
 - **Fail-fast** — opt-in run-level "cancel remaining jobs on first failure". Ruled out
