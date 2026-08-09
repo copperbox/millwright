@@ -116,6 +116,15 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
   medium on-demand confirmed; 30–40 s QUEUED bursts under concurrent starts noted as
   input to [Concurrency semantics](tickets/015-concurrency-semantics.md).
 
+- [Packaging and config surface](tickets/014-packaging-and-config-surface.md) —
+  construct library + `millwright init` thin app; three lockstep `@copperbox` packages
+  (workflows / cdk / cli) with a run-model `schemaVersion` compat contract; construct
+  props are infra-only (name, boundary, cadence, retention) — repos are dynamic via
+  `millwright repo add` writing SSM config + generating deploy keys (security config
+  operator-IAM-gated, not deploy-gated); CLI auth = plain AWS creds with SSM
+  self-registration discovery; discrete guided setup (init → cdk deploy → setup →
+  repo add → doctor). Spawned [Assemble the v1 spec](tickets/017-assemble-v1-spec.md)
+  as the map's terminus.
 - [Runner image model](tickets/013-runner-image-model.md) — any Linux+shell image works
   (static shim injected via S3 secondary source / local mount, never baked in); `image`
   required with job>Workflow>WorkflowSet cascade, no default; millwright publishes no
