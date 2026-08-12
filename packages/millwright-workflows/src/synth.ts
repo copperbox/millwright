@@ -109,7 +109,7 @@ function manualInputDefault(input: ManualInput): unknown {
 
 class Synthesizer {
   private readonly diagnostics: Diagnostic[] = [];
-  private jobsWithSecrets: string[] = [];
+  private readonly jobsWithSecrets: string[] = [];
 
   constructor(
     private readonly set: WorkflowSet,
@@ -444,20 +444,17 @@ class Synthesizer {
       cache = { key, paths: [...props.cache.paths], restoreKeys: [...props.cache.restoreKeys] };
     }
 
-    const base = {
+    return {
       name: job.name,
       image: image ?? '',
       compute: { arch: compute.arch, size: compute.size },
       privileged: props.privileged ?? false,
+      ...(props.timeout !== undefined ? { timeoutMinutes: props.timeout.minutes } : {}),
       steps,
       secrets,
       produces,
       consumes,
       dependsOn,
-    };
-    return {
-      ...base,
-      ...(props.timeout !== undefined ? { timeoutMinutes: props.timeout.minutes } : {}),
       ...(cache ? { cache } : {}),
     };
   }

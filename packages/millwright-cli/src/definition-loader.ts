@@ -50,14 +50,14 @@ export function loadDefinition(entryPath: string, options: LoadOptions = {}): un
   const fallbacks = options.fallbackModules ?? {};
 
   internals._load = function patchedLoad(request, parent, isMain): unknown {
-    if (request in fallbacks) {
-      try {
-        return previousLoad.call(this, request, parent, isMain);
-      } catch {
+    try {
+      return previousLoad.call(this, request, parent, isMain);
+    } catch (err) {
+      if (request in fallbacks) {
         return fallbacks[request];
       }
+      throw err;
     }
-    return previousLoad.call(this, request, parent, isMain);
   };
   internals._extensions['.ts'] = (module, filename) => {
     const source = fs.readFileSync(filename, 'utf8');
