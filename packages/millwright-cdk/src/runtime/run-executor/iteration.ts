@@ -8,6 +8,7 @@ import {
   RunItem,
   RunModel,
   RunModelJob,
+  RunModelWorkflow,
   decide,
   formatRunId,
   parseRunId,
@@ -211,7 +212,7 @@ export async function runDeciderIteration(
   }
   const anchorMs = markStarted ? nowMs : Date.parse(run.originalStartedAt ?? run.startedAt!);
 
-  let jobsModel;
+  let jobsModel: RunModelWorkflow;
   try {
     jobsModel = workflowFromModel(await models.load(coords), coords.workflow);
   } catch (err) {

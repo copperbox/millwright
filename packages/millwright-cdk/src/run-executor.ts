@@ -70,9 +70,10 @@ export class RunExecutor extends Construct {
     this.synthFunctionName = `${name}-synth`;
     this.postSynthFunctionName = `${name}-post-synth`;
     const buildProjectArn = `arn:${Aws.PARTITION}:codebuild:${Aws.REGION}:${Aws.ACCOUNT_ID}:project/${this.buildProjectName}`;
-    const synthFunctionArns = [this.synthFunctionName, this.postSynthFunctionName].map(
-      (fn) => `arn:${Aws.PARTITION}:lambda:${Aws.REGION}:${Aws.ACCOUNT_ID}:function:${fn}`,
-    );
+    const lambdaArn = (fn: string): string =>
+      `arn:${Aws.PARTITION}:lambda:${Aws.REGION}:${Aws.ACCOUNT_ID}:function:${fn}`;
+    const synthFunctionArn = lambdaArn(this.synthFunctionName);
+    const postSynthFunctionArn = lambdaArn(this.postSynthFunctionName);
 
     this.deciderFn = new NodejsFunction(this, 'DeciderFn', {
       description: `millwright (${name}) decider: one iteration of the run executor loop`,
@@ -122,8 +123,8 @@ export class RunExecutor extends Construct {
         JSON.stringify(
           renderRunExecutorDefinition({
             deciderFunctionArn: this.deciderFn.functionArn,
-            synthFunctionArn: synthFunctionArns[0],
-            postSynthFunctionArn: synthFunctionArns[1],
+            synthFunctionArn,
+            postSynthFunctionArn,
             stateMachineArn: this.stateMachineArn,
           }),
         ),
@@ -133,7 +134,7 @@ export class RunExecutor extends Construct {
     this.stateMachine.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['lambda:InvokeFunction'],
-        resources: synthFunctionArns,
+        resources: [synthFunctionArn, postSynthFunctionArn],
       }),
     );
     // Carry-over: the terminal state starts a fresh execution of this same

@@ -3,6 +3,7 @@ import { SFNClient, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DEFAULT_METADATA_RETENTION_DAYS } from '@copperbox/millwright-state';
 import { isStaleTokenError } from '../shared/jobs';
+import { log, requireEnv } from '../shared/lambda';
 import {
   BuildEventsDeps,
   CodeBuildStateChangeEvent,
@@ -17,18 +18,6 @@ import { DynamoBuildEventsStore } from './store';
  * EventBridge's async retry redeliver; every write here is idempotent and
  * the wake is pure signal, so redelivery is safe.
  */
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable ${name}`);
-  }
-  return value;
-}
-
-function log(message: string, fields?: Record<string, unknown>): void {
-  console.log(JSON.stringify({ message, ...fields }));
-}
 
 class SfnWakeSender implements WakeSender {
   constructor(private readonly client: SFNClient) {}

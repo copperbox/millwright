@@ -5,6 +5,7 @@ import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DEFAULT_METADATA_RETENTION_DAYS } from '@copperbox/millwright-state';
 import { isStaleTokenError } from '../shared/jobs';
+import { log, requireEnv } from '../shared/lambda';
 import { CodeBuildRunner } from './codebuild';
 import { DeciderDeps, DeciderTaskInput, TokenSender, runDeciderIteration } from './iteration';
 import { S3ModelSource } from './model-source';
@@ -18,18 +19,6 @@ import { DynamoDeciderStore } from './store';
  */
 
 export const DEFAULT_ITERATION_BUDGET = 500;
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable ${name}`);
-  }
-  return value;
-}
-
-function log(message: string, fields?: Record<string, unknown>): void {
-  console.log(JSON.stringify({ message, ...fields }));
-}
 
 class SfnTokenSender implements TokenSender {
   constructor(private readonly client: SFNClient) {}

@@ -4,7 +4,7 @@ import {
   StartBuildCommand,
   StopBuildCommand,
 } from '@aws-sdk/client-codebuild';
-import { BuildOutcome, RunModelJob } from '@copperbox/millwright-state';
+import { BuildOutcome, RunModelCompute, RunModelJob } from '@copperbox/millwright-state';
 import { BuildRunner, BuildSnapshot, DispatchContext } from './iteration';
 
 /**
@@ -37,6 +37,18 @@ export function toBuildOutcome(status: string | undefined): BuildOutcome {
   return (OUTCOMES as readonly string[]).includes(status ?? '')
     ? (status as BuildOutcome)
     : 'FAULT';
+}
+
+/** Model compute size → CodeBuild compute type; small is the default (§7.4). */
+function computeTypeFor(size: RunModelCompute['size']): string {
+  switch (size) {
+    case 'large':
+      return 'BUILD_GENERAL1_LARGE';
+    case 'medium':
+      return 'BUILD_GENERAL1_MEDIUM';
+    default:
+      return 'BUILD_GENERAL1_SMALL';
+  }
 }
 
 export function renderInterimBuildspec(job: RunModelJob): string {
@@ -75,12 +87,7 @@ export class CodeBuildRunner implements BuildRunner {
         ...(job.image ? { imageOverride: job.image } : {}),
         environmentTypeOverride:
           job.compute?.arch === 'x86_64' ? 'LINUX_CONTAINER' : 'ARM_CONTAINER',
-        computeTypeOverride:
-          job.compute?.size === 'large'
-            ? 'BUILD_GENERAL1_LARGE'
-            : job.compute?.size === 'medium'
-              ? 'BUILD_GENERAL1_MEDIUM'
-              : 'BUILD_GENERAL1_SMALL',
+        computeTypeOverride: computeTypeFor(job.compute?.size),
         privilegedModeOverride: job.privileged === true,
         ...(job.timeoutMinutes ? { timeoutInMinutesOverride: job.timeoutMinutes } : {}),
         imagePullCredentialsTypeOverride: 'SERVICE_ROLE',
