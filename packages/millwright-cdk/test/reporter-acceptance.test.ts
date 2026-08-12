@@ -1,0 +1,369 @@
+import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  GithubCredentials,
+  desiredJobCheck,
+  desiredSynthFailed,
+  desiredSynthStarted,
+  desiredSynthSucceeded,
+  parseDesiredCheckState,
+  synthCheckContext,
+} from '@copperbox/millwright-state';
+import { generateKeyPairSync } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
+import { desiredCheckUpsert, isConditionalCheckFailure } from '../src/runtime/shared/checks';
+import { GithubCheckPublisher, ReporterFetch } from '../src/runtime/reporter/github';
+import { ReporterDeps, reconcileCheck, sweepChecks } from '../src/runtime/reporter/reporter';
+import { DynamoReporterStore } from '../src/runtime/reporter/store';
+
+/**
+ * Acceptance-level flows from issue #19: the real store and the real
+ * desired-state upsert run against a fake document client that EVALUATES
+ * the update/condition expressions this codebase issues (not a general
+ * DynamoDB), plus a scripted GitHub. The pieces under test are exactly the
+ * writes and gates that carry the §13.2 ownership and degradation rules.
+ */
+
+type Item = Record<string, unknown> & { pk: string; sk: string };
+
+class ConditionalCheckFailed extends Error {
+  constructor() {
+    super('The conditional request failed');
+    this.name = 'ConditionalCheckFailedException';
+  }
+}
+
+class FakeCheckTable {
+  readonly items = new Map<string, Item>();
+
+  get(key: { pk: string; sk: string }): Item | undefined {
+    return this.items.get(`${key.pk}\u0000${key.sk}`);
+  }
+
+  client(): DynamoDBDocumentClient {
+    return {
+      send: async (command: { input: Record<string, any> }) => {
+        if (command instanceof GetCommand) {
+          return { Item: this.get(command.input.Key as Item) };
+        }
+        if (command instanceof ScanCommand) {
+          // The sweep's fixed filter: unconverged, unabandoned CHECK# items.
+          const items = [...this.items.values()].filter(
+            (item) =>
+              item.pk.startsWith('CHECK#') &&
+              item.desired !== undefined &&
+              item.abandoned === undefined &&
+              item.reported !== item.desired,
+          );
+          return { Items: items };
+        }
+        if (command instanceof UpdateCommand) {
+          return this.update(command.input as Record<string, any>);
+        }
+        throw new Error(`FakeCheckTable: unexpected command ${command.constructor.name}`);
+      },
+    } as unknown as DynamoDBDocumentClient;
+  }
+
+  private update(input: Record<string, any>): Record<string, unknown> {
+    const key = input.Key as Item;
+    const existing = this.get(key);
+    const values = (input.ExpressionAttributeValues ?? {}) as Record<string, unknown>;
+    this.assertCondition(input.ConditionExpression as string | undefined, existing, values);
+    const next: Item = { ...(existing ?? key) };
+    const expression = input.UpdateExpression as string;
+    const names = (input.ExpressionAttributeNames ?? {}) as Record<string, string>;
+    const resolve = (attribute: string) => names[attribute] ?? attribute;
+    const removeSplit = expression.split(/\s*REMOVE\s+/);
+    const setPart = removeSplit[0].replace(/^SET\s+/, '');
+    for (const assignment of setPart.split(',')) {
+      const [attribute, placeholder] = assignment.split('=').map((part) => part.trim());
+      next[resolve(attribute)] = values[placeholder];
+    }
+    if (removeSplit[1]) {
+      for (const attribute of removeSplit[1].split(',')) {
+        delete next[resolve(attribute.trim())];
+      }
+    }
+    this.items.set(`${key.pk}\u0000${key.sk}`, next);
+    return {};
+  }
+
+  /** Evaluates exactly the three condition shapes the reporter slice issues. */
+  private assertCondition(
+    condition: string | undefined,
+    existing: Item | undefined,
+    values: Record<string, unknown>,
+  ): void {
+    if (!condition) {
+      return;
+    }
+    if (condition === 'attribute_exists(pk)') {
+      if (!existing) {
+        throw new ConditionalCheckFailed();
+      }
+      return;
+    }
+    if (condition === 'desired = :seenDesired') {
+      if (!existing || existing.desired !== values[':seenDesired']) {
+        throw new ConditionalCheckFailed();
+      }
+      return;
+    }
+    if (condition === 'attribute_not_exists(ownerRunNumber) OR ownerRunNumber <= :ownerRunNumber') {
+      const stored = existing?.ownerRunNumber as number | undefined;
+      if (stored !== undefined && stored > (values[':ownerRunNumber'] as number)) {
+        throw new ConditionalCheckFailed();
+      }
+      return;
+    }
+    throw new Error(`FakeCheckTable: unexpected condition "${condition}"`);
+  }
+}
+
+interface GithubCall {
+  method: string;
+  url: string;
+  body?: Record<string, any>;
+}
+
+/** Scripted GitHub: auto-succeeds auth, records check/status writes. */
+class FakeGithub {
+  calls: GithubCall[] = [];
+  failuresLeft = 0;
+  private nextCheckRunId = 1000;
+
+  fetchLike(): ReporterFetch {
+    return async (url, init) => {
+      const call: GithubCall = {
+        method: init?.method ?? 'GET',
+        url,
+        body: init?.body ? JSON.parse(init.body) : undefined,
+      };
+      const respond = (status: number, body: unknown) => ({
+        ok: status < 300,
+        status,
+        headers: { get: () => null },
+        text: async () => JSON.stringify(body),
+      });
+      if (url.endsWith('/installation')) {
+        return respond(200, { id: 7 });
+      }
+      if (url.includes('/access_tokens')) {
+        return respond(201, { token: 'ghs_x', expires_at: '2099-01-01T00:00:00Z' });
+      }
+      this.calls.push(call);
+      if (this.failuresLeft > 0) {
+        this.failuresLeft -= 1;
+        return respond(503, { message: 'unavailable' });
+      }
+      if (call.method === 'POST' && url.endsWith('/check-runs')) {
+        return respond(201, { id: this.nextCheckRunId++ });
+      }
+      if (call.method === 'PATCH') {
+        return respond(200, { id: Number(url.split('/').pop()) });
+      }
+      return respond(201, {});
+    };
+  }
+
+  writesFor(context: string): GithubCall[] {
+    return this.calls.filter(
+      (call) => call.body?.name === context || call.body?.context === context,
+    );
+  }
+}
+
+const SHA = 'b'.repeat(40);
+const REPO = 'octocat/app';
+const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const APP: GithubCredentials = {
+  mode: 'app',
+  appId: 1,
+  slug: 's',
+  privateKeyPem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(),
+};
+const START = Date.parse('2026-08-12T06:00:00Z');
+
+function harness(credentials: GithubCredentials = APP) {
+  const table = new FakeCheckTable();
+  const github = new FakeGithub();
+  const client = table.client();
+  const publisher = new GithubCheckPublisher({
+    fetchLike: github.fetchLike(),
+    loadCredentials: async () => credentials,
+    now: () => START,
+  });
+  const deps: ReporterDeps = {
+    store: new DynamoReporterStore(client, 'state'),
+    publisher,
+    log: () => {},
+  };
+  const decide = async (
+    context: string,
+    runNumber: number,
+    desired: Parameters<typeof desiredCheckUpsert>[1]['desired'],
+    nowMs: number,
+  ): Promise<'written' | 'dropped'> => {
+    try {
+      await client.send(
+        new UpdateCommand(
+          desiredCheckUpsert(
+            'state',
+            { repo: REPO, sha: SHA, context, ownerRun: `ci#${runNumber}`, ownerRunNumber: runNumber, desired },
+            nowMs,
+            90,
+          ),
+        ),
+      );
+      return 'written';
+    } catch (err) {
+      if (isConditionalCheckFailure(err)) {
+        return 'dropped';
+      }
+      throw err;
+    }
+  };
+  const reconcile = (context: string, nowMs: number) =>
+    reconcileCheck(deps, { repo: REPO, sha: SHA, context }, nowMs);
+  return { table, github, deps, decide, reconcile };
+}
+
+describe('acceptance: run lifecycle', () => {
+  it('creates the synth check in_progress at start, job checks queued post-synth, conclusions at the end', async () => {
+    const { github, decide, reconcile } = harness();
+    const synthContext = synthCheckContext('ci');
+
+    await decide(synthContext, 142, desiredSynthStarted('ci#142'), START);
+    expect(await reconcile(synthContext, START)).toBe('reported');
+
+    await decide(synthContext, 142, desiredSynthSucceeded('ci#142', 1), START + 5_000);
+    await decide('ci / build', 142, desiredJobCheck('queued', { runId: 'ci#142', steps: [] }), START + 5_000);
+    expect(await reconcile(synthContext, START + 5_000)).toBe('reported');
+    expect(await reconcile('ci / build', START + 5_000)).toBe('reported');
+
+    await decide(
+      'ci / build',
+      142,
+      desiredJobCheck('SUCCEEDED', {
+        runId: 'ci#142',
+        steps: [{ name: 'test', status: 'SUCCEEDED', durationSeconds: 30 }],
+      }),
+      START + 60_000,
+    );
+    expect(await reconcile('ci / build', START + 60_000)).toBe('reported');
+
+    const synthWrites = github.writesFor(synthContext);
+    expect(synthWrites.map((call) => call.method)).toEqual(['POST', 'PATCH']);
+    expect(synthWrites[0].body!.status).toBe('in_progress');
+    expect(synthWrites[1].body!.conclusion).toBe('success');
+
+    const jobWrites = github.writesFor('ci / build');
+    expect(jobWrites.map((call) => call.method)).toEqual(['POST', 'PATCH']);
+    expect(jobWrites[0].body!.status).toBe('queued');
+    expect(jobWrites[1].body!.conclusion).toBe('success');
+    expect(jobWrites[1].body!.output.summary).toContain('ci#142');
+  });
+
+  it('fails the synth check with the error in its summary when workflows.ts is broken', async () => {
+    const { github, decide, reconcile } = harness();
+    const synthContext = synthCheckContext('ci');
+    await decide(synthContext, 7, desiredSynthStarted('ci#7'), START);
+    await reconcile(synthContext, START);
+    await decide(synthContext, 7, desiredSynthFailed('ci#7', 'workflows.ts:3 boom'), START + 1_000);
+    await reconcile(synthContext, START + 1_000);
+
+    const writes = github.writesFor(synthContext);
+    expect(writes[1].body!.conclusion).toBe('failure');
+    expect(writes[1].body!.output.summary).toContain('workflows.ts:3 boom');
+  });
+});
+
+describe('acceptance: two runs on one sha', () => {
+  it("drops the older run's writes silently and never duplicates the context's check run", async () => {
+    const { table, github, decide, reconcile } = harness();
+    const context = 'ci / build';
+
+    // Run 2 (the newer) reports queued first; run 1 replays late.
+    expect(await decide(context, 2, desiredJobCheck('queued', { runId: 'ci#2', steps: [] }), START)).toBe('written');
+    expect(await reconcile(context, START)).toBe('reported');
+    expect(
+      await decide(context, 1, desiredJobCheck('SUCCEEDED', { runId: 'ci#1', steps: [] }), START + 1_000),
+    ).toBe('dropped');
+    expect(await reconcile(context, START + 1_000)).toBe('converged');
+
+    // Run 2 completes; the same check run is updated, not re-created.
+    expect(
+      await decide(context, 2, desiredJobCheck('FAILED', { runId: 'ci#2', steps: [] }), START + 2_000),
+    ).toBe('written');
+    expect(await reconcile(context, START + 2_000)).toBe('reported');
+
+    const writes = github.writesFor(context);
+    expect(writes.map((call) => call.method)).toEqual(['POST', 'PATCH']);
+    expect(writes[1].body!.output.summary).toContain('ci#2');
+
+    const item = table.get({ pk: `CHECK#${REPO}#${SHA}`, sk: `CTX#${context}` })!;
+    expect(item.ownerRun).toBe('ci#2');
+    expect(parseDesiredCheckState(item.reported as string).conclusion).toBe('failure');
+  });
+});
+
+describe('acceptance: GitHub outage', () => {
+  it('backs off per policy, then converges with one call per check carrying the latest state', async () => {
+    const { table, github, decide, reconcile, deps } = harness();
+    const context = 'ci / build';
+    github.failuresLeft = 2;
+
+    await decide(context, 3, desiredJobCheck('queued', { runId: 'ci#3', steps: [] }), START);
+    expect(await reconcile(context, START)).toBe('backed-off');
+    const afterFirst = table.get({ pk: `CHECK#${REPO}#${SHA}`, sk: `CTX#${context}` })!;
+    expect(afterFirst.backoffAttempts).toBe(1);
+    expect(afterFirst.nextAttemptAt).toBe(new Date(START + 60_000).toISOString());
+
+    // Still down at the retry; the delay doubles.
+    expect(await reconcile(context, START + 61_000)).toBe('backed-off');
+    const afterSecond = table.get({ pk: `CHECK#${REPO}#${SHA}`, sk: `CTX#${context}` })!;
+    expect(afterSecond.nextAttemptAt).toBe(new Date(START + 61_000 + 120_000).toISOString());
+
+    // Two more desired writes land during the outage (backoff persists —
+    // the same-run upsert clears it, modeling continued decider activity).
+    await decide(context, 3, desiredJobCheck('in_progress', { runId: 'ci#3', steps: [] }), START + 90_000);
+    await decide(context, 3, desiredJobCheck('SUCCEEDED', { runId: 'ci#3', steps: [] }), START + 120_000);
+
+    // Recovery: the sweep converges with ONE call carrying the LATEST state.
+    github.calls = [];
+    const summary = await sweepChecks(deps, START + 300_000);
+    expect(summary.dispositions).toEqual({ reported: 1 });
+    expect(github.calls).toHaveLength(1);
+    expect(github.calls[0].body!.conclusion).toBe('success');
+  });
+
+  it('marks items unconverged for 7 days abandoned via the sweep', async () => {
+    const { table, decide, deps } = harness();
+    const context = 'ci / build';
+
+    await decide(context, 4, desiredJobCheck('queued', { runId: 'ci#4', steps: [] }), START);
+    const eightDaysOn = START + 8 * 24 * 3600 * 1000;
+    const summary = await sweepChecks(deps, eightDaysOn);
+    expect(summary.dispositions).toEqual({ abandoned: 1 });
+    const item = table.get({ pk: `CHECK#${REPO}#${SHA}`, sk: `CTX#${context}` })!;
+    expect(item.abandoned).toBe(true);
+
+    // Abandoned items are visible but never retried.
+    expect((await sweepChecks(deps, eightDaysOn + 60_000)).scanned).toBe(0);
+  });
+});
+
+describe('acceptance: PAT mode', () => {
+  it('reports identical context names via commit statuses', async () => {
+    const { github, decide, reconcile } = harness({ mode: 'pat', token: 'github_pat_x' });
+    const context = 'ci / build';
+    await decide(context, 5, desiredJobCheck('SUCCEEDED', { runId: 'ci#5', steps: [] }), START);
+    expect(await reconcile(context, START)).toBe('reported');
+
+    expect(github.calls).toHaveLength(1);
+    expect(github.calls[0].url).toBe(`https://api.github.com/repos/${REPO}/statuses/${SHA}`);
+    expect(github.calls[0].body!.context).toBe(context);
+    expect(github.calls[0].body!.state).toBe('success');
+  });
+});

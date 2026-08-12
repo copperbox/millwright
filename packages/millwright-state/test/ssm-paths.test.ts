@@ -7,6 +7,7 @@ import {
   hostKeysParameterName,
   manifestParameterName,
   repoConfigParameterName,
+  repoFromConfigParameterName,
   secretParameterName,
 } from '../src';
 
@@ -28,6 +29,16 @@ describe('SSM config-plane paths', () => {
     expect(secretParameterName(NAME, REPO, 'NPM_TOKEN')).toBe(
       '/millwright/ci-platform/secrets/copperbox/millwright/NPM_TOKEN',
     );
+  });
+
+  it('inverts repo-config parameter names for prefix listing', () => {
+    expect(repoFromConfigParameterName(NAME, repoConfigParameterName(NAME, REPO))).toBe(REPO);
+    expect(repoFromConfigParameterName(NAME, deployKeyParameterName(NAME, REPO))).toBeUndefined();
+    expect(repoFromConfigParameterName(NAME, manifestParameterName(NAME))).toBeUndefined();
+    expect(repoFromConfigParameterName(NAME, '/millwright/ci-platform/repos//config')).toBeUndefined();
+    expect(
+      repoFromConfigParameterName('other', repoConfigParameterName(NAME, REPO)),
+    ).toBeUndefined();
   });
 
   it('inverts manifest parameter names for CLI discovery', () => {

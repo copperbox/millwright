@@ -12,9 +12,12 @@ import { BuildProject } from './build-project';
 import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
+import { Poller } from './poller';
+import { Reporter } from './reporter';
 import { RunExecutor } from './run-executor';
 import { ShimAssets } from './shim-assets';
 import { StepEventsWriter } from './step-events-writer';
+import { SynthJob } from './synth-job';
 import { Sweep } from './sweep';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
@@ -96,6 +99,8 @@ export class Millwright extends Construct {
   readonly configKey: kms.Key;
   /** C17 — the log group receiving one stream per build. */
   readonly buildLogGroup: logs.LogGroup;
+  /** C11 + the synth phase (spec §7.2): project, synth job, post-synth step. */
+  readonly synthJob: SynthJob;
   /** C3 — the event bus with its source-conditioned resource policy. */
   readonly eventBus: MillwrightEventBus;
   /** C4 — the launcher consuming trigger events from the bus. */
@@ -110,6 +115,10 @@ export class Millwright extends Construct {
   readonly stepEventsWriter: StepEventsWriter;
   /** C16 — the 1-minute sweep repairing concurrency-group slots. */
   readonly sweep: Sweep;
+  /** C2 — the tier-1 SSH ls-refs poller and its tick schedule. */
+  readonly poller: Poller;
+  /** C8 — the reporter: sole owner of check reconciliation to GitHub. */
+  readonly reporter: Reporter;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -174,6 +183,16 @@ export class Millwright extends Construct {
     this.configKey = stores.configKey;
     this.buildLogGroup = stores.buildLogGroup;
 
+    this.synthJob = new SynthJob(this, 'SynthJob', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      artifactBucket: this.artifactBucket,
+      configKey: this.configKey,
+      buildLogGroup: this.buildLogGroup,
+      metadataRetention: this.metadataRetention,
+      pollCadence: this.pollCadence,
+    });
+
     this.eventBus = new MillwrightEventBus(this, 'EventBus', {
       deploymentName: this.deploymentName,
     });
@@ -211,6 +230,22 @@ export class Millwright extends Construct {
       stateTable: this.stateTable,
       runExecutorArn: this.runExecutor.stateMachineArn,
       metadataRetention: this.metadataRetention,
+    });
+
+    this.poller = new Poller(this, 'Poller', {
+      deploymentName: this.deploymentName,
+      pollCadence: this.pollCadence,
+      pollingTable: this.pollingTable,
+      stateTable: this.stateTable,
+      busName: this.eventBus.busName,
+      pollerRoleName: this.eventBus.pollerRoleName,
+      configKey: this.configKey,
+    });
+
+    this.reporter = new Reporter(this, 'Reporter', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      configKey: this.configKey,
     });
 
     // Self-registered deployment manifest: the CLI lists /millwright/*/manifest

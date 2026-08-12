@@ -373,6 +373,36 @@ describe('dedupe and crash convergence (acceptance criterion 2)', () => {
     await processBusEvent(deps, at('2026-08-12T06:05'), NOW + 300_000);
     expect(store.counters.get('octocat/app#nightly')).toBe(2);
   });
+
+  it('a dispatch starts a run pinned at the resolved sha with its typed inputs stored', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', {
+      deploy: { triggers: [{ kind: 'manual', inputs: {} }] },
+    });
+    const result = await processBusEvent(
+      deps,
+      {
+        source: 'millwright.cli',
+        'detail-type': 'dispatch',
+        detail: {
+          repo: 'octocat/app',
+          ref: 'refs/heads/main',
+          sha: SHA,
+          defaultBranch: 'main',
+          workflow: 'deploy',
+          inputs: { env: 'prod', dryRun: false },
+        },
+      },
+      NOW,
+    );
+    expect(result).toMatchObject({ outcome: 'runs', started: ['octocat/app#deploy#1'] });
+    expect(starter.startedRuns).toEqual(['octocat/app#deploy#1']);
+    expect([...store.runs.values()][0]).toMatchObject({
+      trigger: 'dispatch',
+      sha: SHA,
+      inputs: { env: 'prod', dryRun: false },
+    });
+  });
 });
 
 describe('registry fallback and bootstrap (acceptance criterion 3)', () => {
