@@ -3,10 +3,12 @@ import {
   GetParametersByPathCommand,
   ParameterNotFound,
 } from '@aws-sdk/client-ssm';
+import {
+  deploymentNameFromManifestParameter,
+  manifestParameterName,
+} from '@copperbox/millwright-state';
 
 export const DEPLOYMENT_ENV_VAR = 'MILLWRIGHT_DEPLOYMENT';
-
-const MANIFEST_NAME_PATTERN = /^\/millwright\/([^/]+)\/manifest$/;
 
 /** Contents of /millwright/<name>/manifest, written by the Millwright construct. */
 export interface DeploymentManifest {
@@ -59,9 +61,9 @@ async function listDeploymentNames(client: SsmClientLike): Promise<string[]> {
       }),
     );
     for (const parameter of page.Parameters ?? []) {
-      const match = parameter.Name?.match(MANIFEST_NAME_PATTERN);
-      if (match) {
-        names.push(match[1]);
+      const name = parameter.Name && deploymentNameFromManifestParameter(parameter.Name);
+      if (name) {
+        names.push(name);
       }
     }
     nextToken = page.NextToken;
@@ -70,22 +72,27 @@ async function listDeploymentNames(client: SsmClientLike): Promise<string[]> {
 }
 
 async function getDeployment(client: SsmClientLike, name: string): Promise<Deployment> {
-  const manifestParameterName = `/millwright/${name}/manifest`;
+  let parameterName: string;
+  try {
+    parameterName = manifestParameterName(name);
+  } catch {
+    throw new DiscoveryError(`"${name}" is not a valid millwright deployment name`);
+  }
   let value: string | undefined;
   try {
-    const result = await client.send(new GetParameterCommand({ Name: manifestParameterName }));
+    const result = await client.send(new GetParameterCommand({ Name: parameterName }));
     value = result.Parameter?.Value;
   } catch (err) {
     if (err instanceof ParameterNotFound) {
       throw new DiscoveryError(
         `No millwright deployment named "${name}" in this AWS account/region ` +
-          `(${manifestParameterName} does not exist). Check ${DEPLOYMENT_ENV_VAR} / --deployment ` +
+          `(${parameterName} does not exist). Check ${DEPLOYMENT_ENV_VAR} / --deployment ` +
           'and your AWS credentials/region.',
       );
     }
     throw err;
   }
-  return { name, manifestParameterName, manifest: parseManifest(name, value) };
+  return { name, manifestParameterName: parameterName, manifest: parseManifest(name, value) };
 }
 
 /**

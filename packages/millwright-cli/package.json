@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-ssm": "^3.700.0",
+    "@copperbox/millwright-state": "^0.1.0",
     "commander": "^12.1.0"
   },
   "publishConfig": {
