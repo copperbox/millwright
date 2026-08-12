@@ -78,11 +78,11 @@ export async function sweepGroups(deps: SweepDeps, nowMs: number): Promise<Sweep
     log('repaired stale group slot', { group, finished: running, outcome });
     if (outcome === 'handed-off') {
       handedOff++;
-    } else {
-      // 'cleared', plus the convergence races: 'not-held' (someone else
-      // repaired first) and 'contended' (next tick retries).
-      cleared += outcome === 'cleared' ? 1 : 0;
+    } else if (outcome === 'cleared') {
+      cleared++;
     }
+    // The convergence races count as neither: 'not-held' (someone else
+    // repaired first) and 'contended' (next tick retries).
   }
   return { groups: items.length, healthy, cleared, handedOff };
 }

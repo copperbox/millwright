@@ -23,6 +23,12 @@ import { isConditionalCheckFailure } from './jobs';
  * park a never-started run in the running slot, which nothing repairs.
  */
 
+/** The exact slot occupancy a conditional group write is predicated on. */
+export interface ExpectedGroupSlots {
+  readonly running: string;
+  readonly pending: string;
+}
+
 export interface GroupSlotStore {
   getGroup(group: string): Promise<ConcurrencyGroupItem | undefined>;
   getRun(coords: RunCoordinates): Promise<RunItem | undefined>;
@@ -30,18 +36,11 @@ export interface GroupSlotStore {
    * Hand the running slot to the pending run: running := pending, pending
    * cleared — conditioned on the exact state the caller just read.
    */
-  promotePending(
-    group: string,
-    expected: { readonly running: string; readonly pending: string },
-    nowMs: number,
-  ): Promise<boolean>;
+  promotePending(group: string, expected: ExpectedGroupSlots, nowMs: number): Promise<boolean>;
   /** Free the running slot, conditioned on it still holding this run and no waiter. */
   clearRunning(group: string, expectedRunning: string): Promise<boolean>;
   /** Drop a pending occupant whose run record no longer exists. */
-  dropPending(
-    group: string,
-    expected: { readonly running: string; readonly pending: string },
-  ): Promise<boolean>;
+  dropPending(group: string, expected: ExpectedGroupSlots): Promise<boolean>;
 }
 
 /** The `states:StartExecution` capability the decider and sweep hold. */
@@ -132,11 +131,7 @@ export class DynamoGroupSlotStore implements GroupSlotStore {
     return result.Item as RunItem | undefined;
   }
 
-  async promotePending(
-    group: string,
-    expected: { readonly running: string; readonly pending: string },
-    nowMs: number,
-  ): Promise<boolean> {
+  async promotePending(group: string, expected: ExpectedGroupSlots, nowMs: number): Promise<boolean> {
     return this.conditionalSlotWrite(group, {
       UpdateExpression: 'SET #running = :pending, #ttl = :expiresAt REMOVE #pending',
       ConditionExpression: '#running = :running AND #pending = :pending',
@@ -158,10 +153,7 @@ export class DynamoGroupSlotStore implements GroupSlotStore {
     });
   }
 
-  async dropPending(
-    group: string,
-    expected: { readonly running: string; readonly pending: string },
-  ): Promise<boolean> {
+  async dropPending(group: string, expected: ExpectedGroupSlots): Promise<boolean> {
     return this.conditionalSlotWrite(group, {
       UpdateExpression: 'REMOVE #pending',
       ConditionExpression: '#running = :running AND #pending = :pending',
