@@ -1,8 +1,7 @@
 import { BusEventDetail, POLLER_EVENT_SOURCE } from '@copperbox/millwright-state';
 import type { PutEventsCommandOutput } from '@aws-sdk/client-eventbridge';
 import { PutEventsCommand } from '@aws-sdk/client-eventbridge';
-import { RefEvent } from './ref-map';
-import { BusEmitter } from './poller';
+import { BusEmitter, BusEvent } from './poller';
 
 /** The EventBridge client slice the poller uses; tests inject a fake. */
 export interface EventBridgeClientLike {
@@ -15,7 +14,7 @@ const PUT_EVENTS_BATCH = 10;
 /**
  * Emits one repo's diff events to the C3 bus under `millwright.poller` — the
  * source the bus resource policy binds to the poller role and the launcher's
- * validation requires for push/branch/tag (spec §7.1).
+ * validation requires for push/branch/tag/pr (spec §7.1).
  *
  * Any failed entry throws: the caller then skips the ref-map commit, so the
  * next tick re-diffs and re-emits (emit-then-commit, spec §6.1) and the
@@ -27,7 +26,7 @@ export class EventBridgeBusEmitter implements BusEmitter {
     private readonly busName: string,
   ) {}
 
-  async emit(repo: string, events: readonly RefEvent[], defaultBranch?: string): Promise<void> {
+  async emit(repo: string, events: readonly BusEvent[], defaultBranch?: string): Promise<void> {
     for (let start = 0; start < events.length; start += PUT_EVENTS_BATCH) {
       const batch = events.slice(start, start + PUT_EVENTS_BATCH);
       const result = await this.client.send(

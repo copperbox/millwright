@@ -1,7 +1,11 @@
 import {
+  DEFAULT_REPO_POLLING_CONFIG,
+  RepoPollingConfig,
   configPlaneRoot,
   deployKeyParameterName,
+  githubAppParameterName,
   hostKeysParameterName,
+  parseRepoPollingConfig,
 } from '@copperbox/millwright-state';
 import type {
   GetParameterCommandOutput,
@@ -15,6 +19,7 @@ import {
   ParameterNotFound,
 } from '@aws-sdk/client-ssm';
 import { ConfigPlane } from './poller';
+import { PrConfigPlane } from './pr-poll';
 
 /** The SSM client slice the poller uses; tests inject a fake. */
 export interface SsmClientLike {
@@ -30,10 +35,13 @@ const GET_PARAMETERS_BATCH = 10;
  * The poller's config-plane reads (spec §6.1, §9.2): repo discovery by
  * listing the `repos/` subtree, deploy keys batch-fetched via `GetParameters`
  * and cached in memory while the Lambda is warm, host-key pins re-read each
- * tick (one parameter — staleness is not worth the machinery).
+ * tick (one parameter — staleness is not worth the machinery). The listing
+ * already carries each repo's config document, so the tier-2 toggles
+ * (`prPolling`, `forkPrPolicy`) cost no extra calls.
  */
-export class SsmConfigPlane implements ConfigPlane {
+export class SsmConfigPlane implements ConfigPlane, PrConfigPlane {
   private readonly deployKeys = new Map<string, string>();
+  private repoConfigs = new Map<string, RepoPollingConfig>();
   private readonly reposPath: string;
 
   constructor(
@@ -51,6 +59,7 @@ export class SsmConfigPlane implements ConfigPlane {
    */
   async listRepos(): Promise<string[]> {
     const repos: string[] = [];
+    const configs = new Map<string, RepoPollingConfig>();
     let nextToken: string | undefined;
     do {
       const page = await this.client.send(
@@ -64,11 +73,22 @@ export class SsmConfigPlane implements ConfigPlane {
         const repo = repoFromParameter(this.reposPath, parameter.Name, 'config');
         if (repo) {
           repos.push(repo);
+          configs.set(repo, parseRepoPollingConfig(parameter.Value));
         }
       }
       nextToken = page.NextToken;
     } while (nextToken);
+    this.repoConfigs = configs;
     return repos.sort();
+  }
+
+  /**
+   * Polling toggles captured by the same tick's `listRepos` listing, so
+   * `repo update --fork-prs on` takes effect within one cadence. A repo the
+   * listing has not (re)seen answers with the defaults.
+   */
+  getRepoConfig(repo: string): RepoPollingConfig {
+    return this.repoConfigs.get(repo) ?? DEFAULT_REPO_POLLING_CONFIG;
   }
 
   /**
@@ -110,10 +130,28 @@ export class SsmConfigPlane implements ConfigPlane {
   }
 
   async getHostKeysParameter(): Promise<string | undefined> {
+    return this.readParameter(
+      new GetParameterCommand({ Name: hostKeysParameterName(this.deploymentName) }),
+    );
+  }
+
+  /**
+   * The `github/app` SecureString (spec §9.2) — the tier-2 token minter's
+   * credential source. Absent until `millwright setup` completes; tier 2
+   * stays idle without it.
+   */
+  async getGithubAppParameter(): Promise<string | undefined> {
+    return this.readParameter(
+      new GetParameterCommand({
+        Name: githubAppParameterName(this.deploymentName),
+        WithDecryption: true,
+      }),
+    );
+  }
+
+  private async readParameter(command: GetParameterCommand): Promise<string | undefined> {
     try {
-      const result = await this.client.send(
-        new GetParameterCommand({ Name: hostKeysParameterName(this.deploymentName) }),
-      );
+      const result = await this.client.send(command);
       return result.Parameter?.Value;
     } catch (err) {
       if (err instanceof ParameterNotFound) {

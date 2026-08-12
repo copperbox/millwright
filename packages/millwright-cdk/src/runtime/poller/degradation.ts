@@ -8,6 +8,8 @@
  * - Per-repo quarantine: "Repository not found" / deploy-key rejection are
  *   repo-local, durable conditions. Quarantined repos skip polling and are
  *   retried on their own decaying schedule, self-healing when access returns.
+ * - Tier-2 backoff: PR polling is best-effort — an API error backs the repo's
+ *   pulls listing off with jitter and never touches tier-1 state.
  */
 
 /** Transport failures in one tick that open the breaker (spec §6.3). */
@@ -112,5 +114,44 @@ export function quarantine(
 
 /** A quarantined repo is skipped until its retry window opens. */
 export function isQuarantineActive(state: QuarantineState | undefined, nowMs: number): boolean {
+  return state !== undefined && nowMs < state.retryAt;
+}
+
+/** Tier-2 backoff decays to a 30-minute cadence (spec §6.3). */
+export const MAX_PR_BACKOFF_MS = 30 * 60 * 1000;
+
+/** Per-repo tier-2 backoff, stored inside the repo's PR-polling snapshot. */
+export interface PrBackoffState {
+  /** Consecutive tier-2 API errors in this episode. */
+  readonly attempts: number;
+  /** Epoch ms after which the repo's pulls listing is retried. */
+  readonly retryAt: number;
+}
+
+/**
+ * Fold one tier-2 API error into the repo's backoff: exponential in the tick
+ * cadence with equal jitter (half fixed, half random) so a fleet of repos
+ * recovering from one API outage doesn't re-arrive on a single tick, floored
+ * at any rate-limit reset GitHub announced.
+ */
+export function prBackoff(
+  previous: PrBackoffState | undefined,
+  nowMs: number,
+  cadenceMs: number,
+  random: () => number,
+  rateLimitResetMs?: number,
+): PrBackoffState {
+  const attempts = (previous?.attempts ?? 0) + 1;
+  const delay = Math.min(cadenceMs * 2 ** (attempts - 1), MAX_PR_BACKOFF_MS);
+  const jittered = nowMs + delay / 2 + random() * (delay / 2);
+  const retryAt =
+    rateLimitResetMs !== undefined && rateLimitResetMs > jittered
+      ? rateLimitResetMs + random() * cadenceMs
+      : jittered;
+  return { attempts, retryAt };
+}
+
+/** A backing-off repo's pulls listing is skipped until its window opens. */
+export function isPrBackoffActive(state: PrBackoffState | undefined, nowMs: number): boolean {
   return state !== undefined && nowMs < state.retryAt;
 }

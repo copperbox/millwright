@@ -3,12 +3,15 @@ import {
   BREAKER_QUORUM,
   CLOSED_BREAKER,
   MAX_PROBE_INTERVAL_MS,
+  MAX_PR_BACKOFF_MS,
   MAX_QUARANTINE_RETRY_MS,
   QUARANTINE_BASE_RETRY_MS,
   afterFullTick,
   afterProbe,
+  isPrBackoffActive,
   isQuarantineActive,
   planTick,
+  prBackoff,
   quarantine,
 } from '../src/runtime/poller/degradation';
 
@@ -79,5 +82,39 @@ describe('per-repo quarantine (spec §6.3)', () => {
     expect(isQuarantineActive(state, state.retryAt - 1)).toBe(true);
     expect(isQuarantineActive(state, state.retryAt)).toBe(false);
     expect(isQuarantineActive(undefined, NOW)).toBe(false);
+  });
+});
+
+describe('tier-2 backoff (spec §6.3)', () => {
+  it('starts around one cadence with equal jitter', () => {
+    const low = prBackoff(undefined, NOW, CADENCE, () => 0);
+    const high = prBackoff(undefined, NOW, CADENCE, () => 1);
+    expect(low).toEqual({ attempts: 1, retryAt: NOW + CADENCE / 2 });
+    expect(high).toEqual({ attempts: 1, retryAt: NOW + CADENCE });
+  });
+
+  it('decays exponentially and caps at 30 minutes', () => {
+    let state = prBackoff(undefined, NOW, CADENCE, () => 1);
+    expect(prBackoff(state, NOW, CADENCE, () => 1).retryAt).toBe(NOW + 2 * CADENCE);
+    for (let i = 0; i < 12; i += 1) {
+      state = prBackoff(state, NOW, CADENCE, () => 1);
+    }
+    expect(state.retryAt).toBe(NOW + MAX_PR_BACKOFF_MS);
+  });
+
+  it('floors the retry at an announced rate-limit reset, plus jitter', () => {
+    const reset = NOW + 15 * 60 * 1000;
+    const state = prBackoff(undefined, NOW, CADENCE, () => 0.5, reset);
+    expect(state.retryAt).toBe(reset + CADENCE / 2);
+    // A reset already inside the jittered window changes nothing.
+    const near = prBackoff(undefined, NOW, CADENCE, () => 0.5, NOW + 1);
+    expect(near.retryAt).toBe(NOW + CADENCE * 0.75);
+  });
+
+  it('is active until the retry window opens', () => {
+    const state = prBackoff(undefined, NOW, CADENCE, () => 0.5);
+    expect(isPrBackoffActive(state, state.retryAt - 1)).toBe(true);
+    expect(isPrBackoffActive(state, state.retryAt)).toBe(false);
+    expect(isPrBackoffActive(undefined, NOW)).toBe(false);
   });
 });

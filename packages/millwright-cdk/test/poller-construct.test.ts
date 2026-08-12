@@ -56,7 +56,8 @@ describe('poller function (C2, spec §6.1)', () => {
 
   it('scopes the poller role per the §10.3 inventory', () => {
     const { template } = synth();
-    // Config-plane reads: deploy keys + repo configs + host-key pins.
+    // Config-plane reads: deploy keys + repo configs + host-key pins + the
+    // GitHub App credentials for tier-2 token minting (spec §13.1).
     template.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: Match.objectLike({
         Statement: Match.arrayWith([
@@ -67,6 +68,13 @@ describe('poller function (C2, spec §6.1)', () => {
               Match.objectLike({
                 'Fn::Join': Match.arrayWith([
                   Match.arrayWith([Match.stringLikeRegexp('parameter/millwright/ci/repos')]),
+                ]),
+              }),
+              Match.objectLike({
+                'Fn::Join': Match.arrayWith([
+                  Match.arrayWith([
+                    Match.stringLikeRegexp('parameter/millwright/ci/github/app'),
+                  ]),
                 ]),
               }),
             ]),

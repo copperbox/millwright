@@ -1,6 +1,7 @@
 import {
   CIRCUIT_BREAKER_KEY,
   RECONCILED_HOST_KEYS_KEY,
+  prEtagKey,
   quarantineKey,
   refMapKey,
 } from '@copperbox/millwright-state';
@@ -93,6 +94,36 @@ describe('DynamoPollingStore', () => {
     await store.putCircuitBreaker(open);
     expect(await store.getCircuitBreaker()).toEqual(open);
     expect(client.items.has(`${CIRCUIT_BREAKER_KEY.pk}|${CIRCUIT_BREAKER_KEY.sk}`)).toBe(true);
+  });
+
+  it('round-trips the tier-2 PR snapshot under the PR-ETAG sort key', async () => {
+    const client = new FakeDocumentClient();
+    const store = new DynamoPollingStore(client as never, 'mw-polling');
+    expect(await store.getPrSnapshot('octo/app')).toBeUndefined();
+
+    const snapshot = {
+      etag: 'W/"abc"',
+      heads: { '7': sha(1), '12': sha(2) },
+      forkPrPolicy: true,
+      backoff: { attempts: 2, retryAt: NOW + 120_000 },
+    };
+    await store.putPrSnapshot('octo/app', snapshot, NOW);
+    expect(await store.getPrSnapshot('octo/app')).toEqual(snapshot);
+    const item = client.items.get(`${prEtagKey('octo/app').pk}|${prEtagKey('octo/app').sk}`)!;
+    expect(item.openPrCount).toBe(2);
+    expect(item.updatedAt).toBe(new Date(NOW).toISOString());
+
+    // Absent etag and backoff stay absent on the round-trip.
+    await store.putPrSnapshot('octo/app', { heads: {}, forkPrPolicy: false }, NOW);
+    expect(await store.getPrSnapshot('octo/app')).toEqual({ heads: {}, forkPrPolicy: false });
+  });
+
+  it('re-baselines a malformed PR snapshot silently (tier 2 is best-effort)', async () => {
+    const client = new FakeDocumentClient();
+    const key = prEtagKey('octo/app');
+    client.items.set(`${key.pk}|${key.sk}`, { ...key, etag: 42, heads: 'nope' });
+    const store = new DynamoPollingStore(client as never, 'mw-polling');
+    expect(await store.getPrSnapshot('octo/app')).toBeUndefined();
   });
 
   it('round-trips reconciled host keys', async () => {

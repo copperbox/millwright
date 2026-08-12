@@ -98,6 +98,33 @@ describe('SsmConfigPlane', () => {
     expect([...keys.keys()]).toEqual(['octo/app']);
   });
 
+  it('captures the tier-2 toggles from the same listing that discovers repos', async () => {
+    const ssm = new FakeSsm([
+      { name: `${ROOT}/octo/app/config`, value: '{"forkPrPolicy":"on"}' },
+      { name: `${ROOT}/octo/lib/config`, value: '{"prPolling":false}' },
+      { name: `${ROOT}/octo/odd/config`, value: 'not json' },
+    ]);
+    const plane = new SsmConfigPlane(ssm as never, 'mw');
+
+    // Before any listing: the defaults.
+    expect(plane.getRepoConfig('octo/app')).toEqual({ prPolling: true, forkPrPolicy: false });
+
+    await plane.listRepos();
+    expect(plane.getRepoConfig('octo/app')).toEqual({ prPolling: true, forkPrPolicy: true });
+    expect(plane.getRepoConfig('octo/lib')).toEqual({ prPolling: false, forkPrPolicy: false });
+    expect(plane.getRepoConfig('octo/odd')).toEqual({ prPolling: true, forkPrPolicy: false });
+    expect(plane.getRepoConfig('octo/unknown')).toEqual({ prPolling: true, forkPrPolicy: false });
+  });
+
+  it('reads the github/app parameter, undefined until setup seeds it', async () => {
+    const empty = new SsmConfigPlane(new FakeSsm([]) as never, 'mw');
+    expect(await empty.getGithubAppParameter()).toBeUndefined();
+
+    const ssm = new FakeSsm([{ name: '/millwright/mw/github/app', value: '{"appId":1}' }]);
+    const plane = new SsmConfigPlane(ssm as never, 'mw');
+    expect(await plane.getGithubAppParameter()).toBe('{"appId":1}');
+  });
+
   it('treats a missing host-keys parameter as undefined', async () => {
     const plane = new SsmConfigPlane(new FakeSsm([]) as never, 'mw');
     expect(await plane.getHostKeysParameter()).toBeUndefined();

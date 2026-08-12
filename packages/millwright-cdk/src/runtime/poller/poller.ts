@@ -11,7 +11,7 @@ import { LsRefsResult, UploadPackRefusedError } from './git/ls-refs';
 import { HostKeyMismatchError, SshAuthRejectedError } from './git/ssh';
 import { MetaFetch, confirmRotation, parseHostKeyPins, resolveHostKeyPins } from './host-keys';
 import { MetricsSink } from './metrics';
-import { RefEvent, RefMap, diffRefMaps, observeRefs } from './ref-map';
+import { RefMap, diffRefMaps, observeRefs } from './ref-map';
 
 /**
  * One tick of the tier-1 poller (spec §6.1): ls-refs every configured repo
@@ -53,9 +53,17 @@ export interface ConfigPlane {
   getHostKeysParameter(): Promise<string | undefined>;
 }
 
+/** What both tiers put on the bus: tier-1 ref diffs and tier-2 `pr` events. */
+export interface BusEvent {
+  readonly kind: 'push' | 'branch' | 'tag' | 'pr';
+  /** Full ref name. */
+  readonly ref: string;
+  readonly sha: string;
+}
+
 /** Bus emission; `bus.ts` provides the EventBridge implementation. */
 export interface BusEmitter {
-  emit(repo: string, events: readonly RefEvent[], defaultBranch?: string): Promise<void>;
+  emit(repo: string, events: readonly BusEvent[], defaultBranch?: string): Promise<void>;
 }
 
 /** One ls-refs exchange over SSH; `handler.ts` wires ssh.ts + ls-refs.ts. */

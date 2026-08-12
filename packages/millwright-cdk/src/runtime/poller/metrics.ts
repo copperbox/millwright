@@ -37,12 +37,57 @@ const METRIC_UNITS: Readonly<Record<keyof TickMetrics, string>> = {
 
 export type MetricsSink = (metrics: TickMetrics) => void;
 
+/** Tier-2 PR-polling tick metrics (spec §6.2, §6.3), same namespace. */
+export interface PrTickMetrics {
+  readonly PrTickDurationMs: number;
+  /** Repos whose pulls listing was actually requested this tick. */
+  readonly PrReposPolled: number;
+  readonly PrEventsEmitted: number;
+  /** Authenticated 304s — free against the primary rate limit. */
+  readonly PrNotModified: number;
+  readonly PrApiErrors: number;
+  /** Fork-authored PR events dropped by `forkPrPolicy` off. */
+  readonly PrForkEventsDropped: number;
+  /** Repos skipped inside an active tier-2 backoff window. */
+  readonly PrBackoffSkips: number;
+}
+
+const PR_METRIC_UNITS: Readonly<Record<keyof PrTickMetrics, string>> = {
+  PrTickDurationMs: 'Milliseconds',
+  PrReposPolled: 'Count',
+  PrEventsEmitted: 'Count',
+  PrNotModified: 'Count',
+  PrApiErrors: 'Count',
+  PrForkEventsDropped: 'Count',
+  PrBackoffSkips: 'Count',
+};
+
+export type PrMetricsSink = (metrics: PrTickMetrics) => void;
+
 /** One EMF blob per tick on stdout. */
 export function createEmfSink(
   deploymentName: string,
   nowMs: () => number,
   write: (line: string) => void = (line) => console.log(line),
 ): MetricsSink {
+  return emfSink<TickMetrics>(METRIC_UNITS, deploymentName, nowMs, write);
+}
+
+/** The tier-2 counterpart — a separate blob so a skipped tier emits nothing. */
+export function createPrEmfSink(
+  deploymentName: string,
+  nowMs: () => number,
+  write: (line: string) => void = (line) => console.log(line),
+): PrMetricsSink {
+  return emfSink<PrTickMetrics>(PR_METRIC_UNITS, deploymentName, nowMs, write);
+}
+
+function emfSink<T extends Record<keyof T, number>>(
+  units: Readonly<Record<keyof T, string>>,
+  deploymentName: string,
+  nowMs: () => number,
+  write: (line: string) => void,
+): (metrics: T) => void {
   return (metrics) => {
     write(
       JSON.stringify({
@@ -52,9 +97,9 @@ export function createEmfSink(
             {
               Namespace: METRICS_NAMESPACE,
               Dimensions: [[DEPLOYMENT_DIMENSION]],
-              Metrics: (Object.keys(metrics) as (keyof TickMetrics)[]).map((name) => ({
+              Metrics: (Object.keys(metrics) as (keyof T)[]).map((name) => ({
                 Name: name,
-                Unit: METRIC_UNITS[name],
+                Unit: units[name],
               })),
             },
           ],

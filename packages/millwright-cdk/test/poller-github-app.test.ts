@@ -121,7 +121,7 @@ describe('InstallationTokenMinter', () => {
   it('does not cache a failed mint and surfaces rate-limit resets', async () => {
     let fail = true;
     const { minter } = fakeApi({ failMint: () => (fail ? 403 : undefined) });
-    const err = await minter.tokenFor('octo/app').catch((e) => e as GithubApiError);
+    const err = (await minter.tokenFor('octo/app').catch((e) => e)) as GithubApiError;
     expect(err).toBeInstanceOf(GithubApiError);
     expect(err.status).toBe(403);
     expect(err.rateLimitResetMs).toBe(1_760_000_900_000);

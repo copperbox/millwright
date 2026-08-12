@@ -108,15 +108,21 @@ export class Poller extends Construct {
     });
 
     // Poller role (spec §10.3): GetParameters on deploy keys + host-key pins
-    // + repo configs, polling-table read/write, PutEvents conditioned to
-    // source millwright.poller.
+    // + repo configs + the GitHub App credentials (tier-2 token minting,
+    // spec §13.1), polling-table read/write, PutEvents conditioned to source
+    // millwright.poller.
     const parameterArn = (suffix: string) =>
       `arn:${Aws.PARTITION}:ssm:${Aws.REGION}:${Aws.ACCOUNT_ID}:parameter/millwright/${name}/${suffix}`;
     this.role.addToPolicy(
       new iam.PolicyStatement({
         sid: 'ConfigPlaneReads',
         actions: ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:GetParametersByPath'],
-        resources: [parameterArn('repos'), parameterArn('repos/*'), parameterArn('github/host-keys')],
+        resources: [
+          parameterArn('repos'),
+          parameterArn('repos/*'),
+          parameterArn('github/host-keys'),
+          parameterArn('github/app'),
+        ],
       }),
     );
     props.configKey.grantDecrypt(this.role);
