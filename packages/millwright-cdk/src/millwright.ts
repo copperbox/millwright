@@ -176,6 +176,7 @@ export class Millwright extends Construct {
       deploymentName: this.deploymentName,
       pollCadence: this.pollCadence,
       pollingTable: this.pollingTable,
+      stateTable: this.stateTable,
       busName: this.eventBus.busName,
       pollerRoleName: this.eventBus.pollerRoleName,
       configKey: this.configKey,

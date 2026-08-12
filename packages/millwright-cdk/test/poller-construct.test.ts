@@ -1,11 +1,15 @@
 import { App, Duration, Stack } from 'aws-cdk-lib';
-import { Match, Template } from 'aws-cdk-lib/assertions';
+import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import { describe, expect, it } from 'vitest';
 import { MillwrightEventBus, Poller } from '../src';
 
-function synth(pollCadence = Duration.minutes(1)): { poller: Poller; template: Template } {
+function synth(pollCadence = Duration.minutes(1)): {
+  poller: Poller;
+  stack: Stack;
+  template: Template;
+} {
   const stack = new Stack(new App(), 'Test');
   const bus = new MillwrightEventBus(stack, 'EventBus', { deploymentName: 'ci' });
   const poller = new Poller(stack, 'Poller', {
@@ -15,11 +19,15 @@ function synth(pollCadence = Duration.minutes(1)): { poller: Poller; template: T
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
     }),
+    stateTable: new dynamodb.Table(stack, 'StateTable', {
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+    }),
     busName: bus.busName,
     pollerRoleName: bus.pollerRoleName,
     configKey: new kms.Key(stack, 'ConfigKey'),
   });
-  return { poller, template: Template.fromStack(stack) };
+  return { poller, stack, template: Template.fromStack(stack) };
 }
 
 describe('poller function (C2, spec §6.1)', () => {
@@ -106,6 +114,43 @@ describe('poller function (C2, spec §6.1)', () => {
       Description: Match.stringLikeRegexp('tier-1 poller'),
       Timeout: 900,
     });
+  });
+
+  it('grants registry reads for the cron pass, conditioned to the REG# prefix', () => {
+    const { template } = synth();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          STATE_TABLE_NAME: Match.anyValue(),
+        }),
+      },
+    });
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'RegistryReadsForCron',
+            Action: 'dynamodb:GetItem',
+            Condition: {
+              'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['REG#*'] },
+            },
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it('warns that cron granularity degrades when the cadence exceeds one minute', () => {
+    const oneMinute = synth();
+    Annotations.fromStack(oneMinute.stack).hasNoWarning(
+      '/Test/Poller',
+      Match.stringLikeRegexp('cron granularity'),
+    );
+    const fiveMinutes = synth(Duration.minutes(5));
+    Annotations.fromStack(fiveMinutes.stack).hasWarning(
+      '/Test/Poller',
+      Match.stringLikeRegexp('cron granularity degrades to the cadence.*'),
+    );
   });
 });
 

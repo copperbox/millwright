@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { POLLER_EVENT_SOURCE } from '@copperbox/millwright-state';
+import { POLLER_EVENT_SOURCE, REGISTRY_PARTITION_PREFIX } from '@copperbox/millwright-state';
 import { Annotations, Aws, Duration } from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -18,6 +18,11 @@ export interface PollerProps {
   readonly pollCadence: Duration;
   /** C10 — the polling table this poller owns at runtime. */
   readonly pollingTable: dynamodb.ITable;
+  /**
+   * C9 — the state table, for the cron pass's read of `REG#` registry rows
+   * only (spec §6.4); the grant is conditioned to that partition prefix.
+   */
+  readonly stateTable: dynamodb.ITable;
   /** C3 — deterministic bus name the diff events are put on. */
   readonly busName: string;
   /**
@@ -55,6 +60,15 @@ export class Poller extends Construct {
     super(scope, id);
     const name = props.deploymentName;
 
+    if (props.pollCadence.toSeconds() > 60) {
+      Annotations.of(this).addWarningV2(
+        '@copperbox/millwright-cdk:cronGranularityDegraded',
+        `pollCadence ${props.pollCadence.toMinutes()} min: the poller tick is the cron clock ` +
+          '(spec §6.4), so cron granularity degrades to the cadence — a per-minute expression ' +
+          'fires once per tick, for the latest matching minute.',
+      );
+    }
+
     let timeout = Duration.seconds(props.pollCadence.toSeconds() * 2);
     if (timeout.toSeconds() > MAX_TIMEOUT.toSeconds()) {
       Annotations.of(this).addWarningV2(
@@ -89,6 +103,7 @@ export class Poller extends Construct {
       environment: {
         DEPLOYMENT_NAME: name,
         POLLING_TABLE_NAME: props.pollingTable.tableName,
+        STATE_TABLE_NAME: props.stateTable.tableName,
         EVENT_BUS_NAME: props.busName,
         POLL_CADENCE_SECONDS: String(props.pollCadence.toSeconds()),
         POLLER_CONCURRENCY: '8',
@@ -127,6 +142,21 @@ export class Poller extends Construct {
     );
     props.configKey.grantDecrypt(this.role);
     props.pollingTable.grantReadWriteData(this.role);
+    // The cron pass reads Trigger.cron from default-branch registry entries
+    // (spec §6.4). GetItem only, conditioned to the `REG#` partition prefix:
+    // the poller can never touch run history or dedupe records.
+    this.role.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'RegistryReadsForCron',
+        actions: ['dynamodb:GetItem'],
+        resources: [props.stateTable.tableArn],
+        conditions: {
+          'ForAllValues:StringLike': {
+            'dynamodb:LeadingKeys': [`${REGISTRY_PARTITION_PREFIX}*`],
+          },
+        },
+      }),
+    );
     this.role.addToPolicy(
       new iam.PolicyStatement({
         sid: 'EmitAsPollerOnly',
