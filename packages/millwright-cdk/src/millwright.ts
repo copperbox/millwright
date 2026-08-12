@@ -9,6 +9,7 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { Boundary } from './boundary';
 import { DataStores } from './data-stores';
+import { Reporter } from './reporter';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -89,6 +90,8 @@ export class Millwright extends Construct {
   readonly configKey: kms.Key;
   /** C17 — the log group receiving one stream per build. */
   readonly buildLogGroup: logs.LogGroup;
+  /** C8 — the reporter: sole owner of check reconciliation to GitHub. */
+  readonly reporter: Reporter;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -152,6 +155,12 @@ export class Millwright extends Construct {
     this.artifactBucket = stores.artifactBucket;
     this.configKey = stores.configKey;
     this.buildLogGroup = stores.buildLogGroup;
+
+    this.reporter = new Reporter(this, 'Reporter', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      configKey: this.configKey,
+    });
 
     // Self-registered deployment manifest: the CLI lists /millwright/*/manifest
     // and auto-picks when exactly one deployment exists in the account+region.
