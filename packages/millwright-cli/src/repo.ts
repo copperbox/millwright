@@ -319,7 +319,14 @@ export async function repoAdd(deps: RepoDeps, options: RepoAddOptions): Promise<
     );
     return;
   }
-  await emitBootstrapEvent(deps, deployment, options.repo, head.ref!, head.sha);
+  if (!head.ref) {
+    deps.output(
+      `${options.repo} reported no default-branch symref — skipping the bootstrap event; ` +
+        'the poller will prime the registry on its first tick.',
+    );
+    return;
+  }
+  await emitBootstrapEvent(deps, deployment, options.repo, head.ref, head.sha);
   deps.output(
     `Onboarding complete — expect a "millwright / synth" check on ${head.branch ?? head.ref} @ ` +
       `${head.sha.slice(0, 12)} once the control plane processes the bootstrap.`,

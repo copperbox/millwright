@@ -112,11 +112,12 @@ export async function listParametersByPrefix(
   client: SsmClientLike,
   prefix: string,
 ): Promise<ListedParameter[]> {
+  const path = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
   const parameters: ListedParameter[] = [];
   let nextToken: string | undefined;
   do {
     const page = await client.send(
-      new GetParametersByPathCommand({ Path: prefix, Recursive: true, NextToken: nextToken }),
+      new GetParametersByPathCommand({ Path: path, Recursive: true, NextToken: nextToken }),
     );
     for (const parameter of page.Parameters ?? []) {
       if (parameter.Name && parameter.Value !== undefined) {
