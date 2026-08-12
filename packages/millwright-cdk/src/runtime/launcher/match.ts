@@ -110,8 +110,10 @@ function triggerMatches(trigger: NarrowedTrigger, event: ValidBusEvent): boolean
       return trigger.kind === 'cron';
     case 'dispatch':
       return trigger.kind === 'manual';
-    // bootstrap events route to the synth-only path before matching.
+    // bootstrap events route to the synth-only path before matching, and
+    // rerun events re-execute one named run without any trigger matching.
     case 'bootstrap':
+    case 'rerun':
       return false;
   }
 }

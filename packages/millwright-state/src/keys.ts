@@ -40,6 +40,7 @@ export const TRIGGER_KINDS = [
   'cron',
   'dispatch',
   'bootstrap',
+  'rerun',
 ] as const;
 export type TriggerKind = (typeof TRIGGER_KINDS)[number];
 

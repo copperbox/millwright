@@ -65,6 +65,12 @@ export interface RunItem extends ExpiringItem {
   readonly cancelRequested?: boolean;
   /** Run id this run is a rerun of. */
   readonly rerunOf?: string;
+  /**
+   * `rerun --failed`: jobs whose succeeded outputs were prefix-copied from
+   * {@link rerunOf} — the decider seeds them terminal SUCCEEDED with
+   * `reusedFrom` instead of dispatching them.
+   */
+  readonly reuseJobs?: readonly string[];
   /** e.g. `superseded` on concurrency-policy cancellation. */
   readonly reason?: string;
   /** Typed inputs carried by a `dispatch` trigger. */
