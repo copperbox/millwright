@@ -86,6 +86,7 @@ export {
   ParsedPollingKey,
   PollingRowKind,
   QUARANTINE_SORT_KEY,
+  RECONCILED_HOST_KEYS_KEY,
   REF_MAP_SORT_KEY,
   cronLastFiredKey,
   parseRepoPollingKey,
