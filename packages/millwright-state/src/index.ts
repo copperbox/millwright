@@ -136,6 +136,14 @@ export {
   secretParameterName,
 } from './ssm-paths';
 export {
+  RoleVariant,
+  gateJobSecrets,
+  matchesAnyRefPattern,
+  matchesRefPattern,
+  secretsAllowedRefsFromConfig,
+  selectRoleVariant,
+} from './secrets-gate';
+export {
   BuildspecContext,
   CACHE_URI_ENV,
   OUT_URI_ENV,
