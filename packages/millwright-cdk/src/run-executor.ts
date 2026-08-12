@@ -79,8 +79,10 @@ export class RunExecutor extends Construct {
       entry: runtimeEntry('run-executor'),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_22_X,
-      // Under the wake timeout, so an iteration never outlives its own wait.
-      timeout: Duration.seconds(55),
+      // Above the 60 s wake timeout: an overrunning iteration is cut off by
+      // the state's States.Timeout catch (safe — dispatch claims are
+      // conditional), never by a hard Lambda timeout failing the state.
+      timeout: Duration.seconds(90),
       memorySize: 256,
       environment: {
         STATE_TABLE_NAME: props.stateTable.tableName,

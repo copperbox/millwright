@@ -47,7 +47,7 @@ describe('run executor wiring (C5–C7)', () => {
     const { template } = synth();
     template.hasResourceProperties('AWS::Lambda::Function', {
       Description: Match.stringLikeRegexp('decider'),
-      Timeout: 55,
+      Timeout: 90,
       Environment: {
         Variables: Match.objectLike({
           BUILD_PROJECT_NAME: 'ci-builds',
