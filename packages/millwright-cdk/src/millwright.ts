@@ -8,6 +8,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { Boundary } from './boundary';
+import { BuildProject } from './build-project';
 import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
@@ -98,6 +99,8 @@ export class Millwright extends Construct {
   readonly launcher: Launcher;
   /** C5–C7 — the run executor machine, decider, and build-events handler. */
   readonly runExecutor: RunExecutor;
+  /** C11 — the single CodeBuild project every job runs on. */
+  readonly buildProject: BuildProject;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -178,6 +181,11 @@ export class Millwright extends Construct {
       artifactBucket: this.artifactBucket,
       metadataRetention: this.metadataRetention,
     });
+    this.buildProject = new BuildProject(this, 'BuildProject', {
+      deploymentName: this.deploymentName,
+      artifactBucket: this.artifactBucket,
+      buildLogGroup: this.buildLogGroup,
+    });
 
     // Self-registered deployment manifest: the CLI lists /millwright/*/manifest
     // and auto-picks when exactly one deployment exists in the account+region.
@@ -203,6 +211,7 @@ export class Millwright extends Construct {
           pollingTable: stores.pollingTableName,
           artifactBucket: this.artifactBucket.bucketName,
           buildLogGroup: stores.buildLogGroupName,
+          buildProject: this.buildProject.projectName,
           configKeyArn: this.configKey.keyArn,
           configKeyAlias: stores.configKeyAlias,
           // The CLI's dispatch/bootstrap PutEvents target.

@@ -1,4 +1,5 @@
 export { Boundary } from './boundary';
+export { BuildProject, BuildProjectProps } from './build-project';
 export { MillwrightEventBus, MillwrightEventBusProps } from './event-bus';
 export { Launcher, LauncherProps } from './launcher';
 export { Millwright, MillwrightProps, RetentionProps } from './millwright';
