@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TarEntry, TarError, extractTarGz, packTarGz } from '../src/runtime/shim/tar';
 
@@ -100,7 +101,6 @@ describe('extraction safety', () => {
     header.write(sum.toString(8).padStart(6, '0'), 148, 'ascii');
     header[154] = 0;
     header[155] = 0x20;
-    const { gzipSync } = require('node:zlib') as typeof import('node:zlib');
     const archive = gzipSync(Buffer.concat([header, Buffer.alloc(1024)]));
     expect(() => extractTarGz(archive)).toThrow(TarError);
     expect(() => extractTarGz(archive)).toThrow(/escapes the extraction root/);
