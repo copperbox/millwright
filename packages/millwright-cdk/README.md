@@ -59,10 +59,26 @@ completion; with that rule disabled, runs still complete via the timeout
 reconciliation path. Long runs carry over to a fresh execution of the same
 machine before the Step Functions history ceiling, resuming from table state.
 
-Still owned by later issues: the concurrency-group hand-off on run completion
-(spec §8.4), check desired-state writes (§13.2), and job-role variant
-selection at dispatch (§10.2). Dispatch renders every job's buildspec through
-the shared control-plane renderer (§7.4) from `@copperbox/millwright-state`.
+Still owned by later issues: check desired-state writes (§13.2) and job-role
+variant selection at dispatch (§10.2). Dispatch renders every job's buildspec
+through the shared control-plane renderer (§7.4) from
+`@copperbox/millwright-state`.
+
+## Concurrency groups and sweep (C16)
+
+Workflows may declare `concurrency: { group, policy }` (spec §8.4); the
+launcher evaluates the group key's `${ref}`/`${workflow}`/`${repo}`/`${event}`
+tokens pre-synth, stamps it on the run record, and gates through the
+`GROUP#<key>` item's running/pending slots with conditional writes — `queue`
+waits in the pending slot of one, `supersede` additionally requests
+cancellation of the in-flight run; a replaced waiter is CANCELLED with
+`reason: superseded` and stays rerunnable. On run completion the decider
+releases the slot and starts the pending run — start first, promote second,
+so every crash point converges. The **sweep**, a Lambda on the 1-minute
+scheduler, is that crash safety: it finds groups whose running run is
+terminal but whose slot never cleared and re-runs the same release. It
+repairs group slots only — run-level caps guarantee dead executions don't
+exist, so it never resurrects one.
 
 ## Step shim and step events (C13, C19)
 

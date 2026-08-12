@@ -1,4 +1,5 @@
 export {
+  CONCURRENCY_GROUP_PARTITION_PREFIX,
   EventIdentity,
   ItemKey,
   KeyFormatError,

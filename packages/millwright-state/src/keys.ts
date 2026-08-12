@@ -325,7 +325,9 @@ export function parseBuildMappingKey(key: ItemKey): { buildId: string } {
 
 // --- Concurrency group: GROUP#<key> / - -----------------------------------
 
-const GROUP_PK_PREFIX = 'GROUP#';
+/** What the sweep's group scan filters on (spec C16). */
+export const CONCURRENCY_GROUP_PARTITION_PREFIX = 'GROUP#';
+const GROUP_PK_PREFIX = CONCURRENCY_GROUP_PARTITION_PREFIX;
 
 export function concurrencyGroupKey(group: string): ItemKey {
   assertNonEmpty('group key', group);

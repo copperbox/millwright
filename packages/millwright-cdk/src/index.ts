@@ -6,6 +6,7 @@ export { Millwright, MillwrightProps, RetentionProps } from './millwright';
 export { RunExecutor, RunExecutorProps } from './run-executor';
 export { ShimAssets, ShimAssetsProps, stageShimDelivery } from './shim-assets';
 export { StepEventsWriter, StepEventsWriterProps } from './step-events-writer';
+export { Sweep, SweepProps } from './sweep';
 export {
   RunExecutorDefinitionProps,
   renderRunExecutorDefinition,

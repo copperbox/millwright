@@ -15,6 +15,7 @@ import { Launcher } from './launcher';
 import { RunExecutor } from './run-executor';
 import { ShimAssets } from './shim-assets';
 import { StepEventsWriter } from './step-events-writer';
+import { Sweep } from './sweep';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -107,6 +108,8 @@ export class Millwright extends Construct {
   readonly shimAssets: ShimAssets;
   /** C19 — the step-events writer projecting shim events into step rows. */
   readonly stepEventsWriter: StepEventsWriter;
+  /** C16 — the 1-minute sweep repairing concurrency-group slots. */
+  readonly sweep: Sweep;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -201,6 +204,12 @@ export class Millwright extends Construct {
       deploymentName: this.deploymentName,
       bus: this.eventBus.bus,
       stateTable: this.stateTable,
+      metadataRetention: this.metadataRetention,
+    });
+    this.sweep = new Sweep(this, 'Sweep', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      runExecutorArn: this.runExecutor.stateMachineArn,
       metadataRetention: this.metadataRetention,
     });
 
