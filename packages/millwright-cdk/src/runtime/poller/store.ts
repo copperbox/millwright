@@ -1,6 +1,7 @@
 import {
   CIRCUIT_BREAKER_KEY,
   RECONCILED_HOST_KEYS_KEY,
+  cronLastFiredKey,
   prEtagKey,
   quarantineKey,
   refMapKey,
@@ -177,6 +178,46 @@ export class DynamoPollingStore implements PollingStore, PrPollingStore {
       new PutCommand({
         TableName: this.tableName,
         Item: { ...CIRCUIT_BREAKER_KEY, ...state },
+      }),
+    );
+  }
+
+  /**
+   * `last-fired-minute` bookkeeping for one cron entry (spec §6.4). Malformed
+   * items read as absent: the cron pass then re-baselines to the current
+   * minute, which can never re-fire a backlog.
+   */
+  async getCronLastFired(
+    repo: string,
+    workflow: string,
+    expression: string,
+  ): Promise<string | undefined> {
+    const result = await this.client.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: cronLastFiredKey(repo, workflow, expression),
+        ConsistentRead: true,
+      }),
+    );
+    const minute = (result.Item as { lastFiredMinute?: unknown } | undefined)?.lastFiredMinute;
+    return typeof minute === 'string' && minute ? minute : undefined;
+  }
+
+  async putCronLastFired(
+    repo: string,
+    workflow: string,
+    expression: string,
+    minute: string,
+    nowMs: number,
+  ): Promise<void> {
+    await this.client.send(
+      new PutCommand({
+        TableName: this.tableName,
+        Item: {
+          ...cronLastFiredKey(repo, workflow, expression),
+          lastFiredMinute: minute,
+          updatedAt: new Date(nowMs).toISOString(),
+        },
       }),
     );
   }

@@ -38,6 +38,8 @@ export class EventBridgeBusEmitter implements BusEmitter {
               sha: event.sha,
               kind: event.kind,
               ...(defaultBranch ? { defaultBranch } : {}),
+              ...(event.workflow ? { workflow: event.workflow } : {}),
+              ...(event.minute ? { minute: event.minute } : {}),
             };
             return {
               EventBusName: this.busName,

@@ -53,12 +53,16 @@ export interface ConfigPlane {
   getHostKeysParameter(): Promise<string | undefined>;
 }
 
-/** What both tiers put on the bus: tier-1 ref diffs and tier-2 `pr` events. */
+/** What the poller puts on the bus: ref diffs, tier-2 `pr` and `cron` fires. */
 export interface BusEvent {
-  readonly kind: 'push' | 'branch' | 'tag' | 'pr';
-  /** Full ref name. */
+  readonly kind: 'push' | 'branch' | 'tag' | 'pr' | 'cron';
+  /** Full ref name (for `cron`: the default branch's ref). */
   readonly ref: string;
   readonly sha: string;
+  /** Target workflow — `cron` events only. */
+  readonly workflow?: string;
+  /** Fired UTC minute (`YYYY-MM-DDTHH:mm`) — `cron` events only. */
+  readonly minute?: string;
 }
 
 /** Bus emission; `bus.ts` provides the EventBridge implementation. */

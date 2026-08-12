@@ -1,6 +1,7 @@
 import {
   CIRCUIT_BREAKER_KEY,
   RECONCILED_HOST_KEYS_KEY,
+  cronLastFiredKey,
   prEtagKey,
   quarantineKey,
   refMapKey,
@@ -135,5 +136,31 @@ describe('DynamoPollingStore', () => {
     expect(
       client.items.has(`${RECONCILED_HOST_KEYS_KEY.pk}|${RECONCILED_HOST_KEYS_KEY.sk}`),
     ).toBe(true);
+  });
+
+  it('round-trips cron last-fired minutes keyed per (workflow, expression)', async () => {
+    const client = new FakeDocumentClient();
+    const store = new DynamoPollingStore(client as never, 'mw-polling');
+    expect(await store.getCronLastFired('octo/app', 'nightly', '*/5 * * * *')).toBeUndefined();
+
+    await store.putCronLastFired('octo/app', 'nightly', '*/5 * * * *', '2026-08-12T06:05', NOW);
+    await store.putCronLastFired('octo/app', 'nightly', '0 3 * * *', '2026-08-12T03:00', NOW);
+    expect(await store.getCronLastFired('octo/app', 'nightly', '*/5 * * * *')).toBe(
+      '2026-08-12T06:05',
+    );
+    expect(await store.getCronLastFired('octo/app', 'nightly', '0 3 * * *')).toBe(
+      '2026-08-12T03:00',
+    );
+
+    const key = cronLastFiredKey('octo/app', 'nightly', '*/5 * * * *');
+    expect(client.items.get(`${key.pk}|${key.sk}`)!.updatedAt).toBe(new Date(NOW).toISOString());
+  });
+
+  it('treats a malformed cron last-fired item as absent', async () => {
+    const client = new FakeDocumentClient();
+    const key = cronLastFiredKey('octo/app', 'nightly', '*/5 * * * *');
+    client.items.set(`${key.pk}|${key.sk}`, { ...key, lastFiredMinute: 42 });
+    const store = new DynamoPollingStore(client as never, 'mw-polling');
+    expect(await store.getCronLastFired('octo/app', 'nightly', '*/5 * * * *')).toBeUndefined();
   });
 });

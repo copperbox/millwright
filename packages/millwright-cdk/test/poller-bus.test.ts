@@ -61,6 +61,33 @@ describe('EventBridgeBusEmitter', () => {
     }
   });
 
+  it('carries workflow and minute on cron events, accepted by launcher validation', async () => {
+    const client = new FakeEventBridge();
+    const emitter = new EventBridgeBusEmitter(client, 'mw-bus');
+    await emitter.emit(
+      'octo/app',
+      [
+        {
+          kind: 'cron',
+          ref: 'refs/heads/main',
+          sha: sha(1),
+          workflow: 'nightly',
+          minute: '2026-08-12T06:05',
+        },
+      ],
+      'main',
+    );
+
+    const entry = client.batches[0][0];
+    expect(entry.DetailType).toBe('cron');
+    const validation = validateBusEvent(entry.Source!, entry.DetailType!, JSON.parse(entry.Detail!));
+    expect(validation).toMatchObject({ ok: true });
+    if (validation.ok) {
+      expect(validation.event.workflow).toBe('nightly');
+      expect(validation.event.minute).toBe('2026-08-12T06:05');
+    }
+  });
+
   it('splits more than ten events into PutEvents batches', async () => {
     const client = new FakeEventBridge();
     const emitter = new EventBridgeBusEmitter(client, 'mw-bus');

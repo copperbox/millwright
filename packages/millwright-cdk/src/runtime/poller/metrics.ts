@@ -64,6 +64,26 @@ const PR_METRIC_UNITS: Readonly<Record<keyof PrTickMetrics, string>> = {
 
 export type PrMetricsSink = (metrics: PrTickMetrics) => void;
 
+/** Cron pass metrics (spec §6.4), same namespace. */
+export interface CronTickMetrics {
+  /** (workflow, expression) pairs evaluated across all repos this tick. */
+  readonly CronEntriesEvaluated: number;
+  readonly CronEventsEmitted: number;
+  /** Entries skipped because their expression failed to parse (fail closed). */
+  readonly CronInvalidExpressions: number;
+  /** Repo- or entry-local failures (registry read, emit) this tick. */
+  readonly CronErrors: number;
+}
+
+const CRON_METRIC_UNITS: Readonly<Record<keyof CronTickMetrics, string>> = {
+  CronEntriesEvaluated: 'Count',
+  CronEventsEmitted: 'Count',
+  CronInvalidExpressions: 'Count',
+  CronErrors: 'Count',
+};
+
+export type CronMetricsSink = (metrics: CronTickMetrics) => void;
+
 /** One EMF blob per tick on stdout. */
 export function createEmfSink(
   deploymentName: string,
@@ -80,6 +100,15 @@ export function createPrEmfSink(
   write: (line: string) => void = (line) => console.log(line),
 ): PrMetricsSink {
   return emfSink<PrTickMetrics>(PR_METRIC_UNITS, deploymentName, nowMs, write);
+}
+
+/** The cron pass counterpart. */
+export function createCronEmfSink(
+  deploymentName: string,
+  nowMs: () => number,
+  write: (line: string) => void = (line) => console.log(line),
+): CronMetricsSink {
+  return emfSink<CronTickMetrics>(CRON_METRIC_UNITS, deploymentName, nowMs, write);
 }
 
 function emfSink<T extends Record<keyof T, number>>(
