@@ -1,6 +1,6 @@
 {
   "name": "@copperbox/millwright-workflows",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Millwright workflow definition library — the only install in watched repos",
   "license": "MIT",
   "repository": {
