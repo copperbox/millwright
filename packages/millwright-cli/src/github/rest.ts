@@ -224,3 +224,45 @@ export async function getTokenIdentity(
   const login = (json as { login?: unknown })?.login;
   return { login: typeof login === 'string' ? login : 'unknown' };
 }
+
+/** GET /app with an App JWT — validates the stored credential end-to-end. */
+export async function getAuthenticatedApp(
+  fetchLike: FetchLike,
+  appJwt: string,
+): Promise<{ slug: string }> {
+  const { json } = await request(fetchLike, 'GET', '/app', { token: appJwt });
+  const slug = (json as { slug?: unknown })?.slug;
+  return { slug: typeof slug === 'string' ? slug : 'unknown' };
+}
+
+/**
+ * GET /repos/{owner}/{repo}/pulls?per_page=1 — doctor's per-repo pulls
+ * probe: proves the token can read pull requests, the permission tier-2
+ * PR polling depends on (spec §6.2, §15).
+ */
+export async function probePulls(fetchLike: FetchLike, token: string, repo: string): Promise<void> {
+  await request(fetchLike, 'GET', `/repos/${repo}/pulls?state=all&per_page=1`, { token });
+}
+
+export interface RepoRuleset {
+  readonly name: string;
+  readonly target: string;
+  readonly enforcement: string;
+}
+
+/** GET /repos/{owner}/{repo}/rulesets — doctor's best-effort protection check. */
+export async function listRepoRulesets(
+  fetchLike: FetchLike,
+  token: string,
+  repo: string,
+): Promise<RepoRuleset[]> {
+  const { json } = await request(fetchLike, 'GET', `/repos/${repo}/rulesets`, { token });
+  if (!Array.isArray(json)) {
+    return [];
+  }
+  return json.map((entry) => ({
+    name: typeof entry?.name === 'string' ? entry.name : '',
+    target: typeof entry?.target === 'string' ? entry.target : '',
+    enforcement: typeof entry?.enforcement === 'string' ? entry.enforcement : '',
+  }));
+}
