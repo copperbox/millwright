@@ -5,9 +5,11 @@ import { GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   CLI_EVENT_SOURCE,
   JobItem,
+  RERUNNABLE_JOB_STATUSES,
   RunCoordinates,
   RunItem,
   RunStatus,
+  TERMINAL_RUN_STATUSES,
   formatRunId,
   parseRunId,
   runKey,
@@ -36,8 +38,6 @@ export class RunsCommandError extends Error {}
 export interface AwsClientLike {
   send(command: unknown): Promise<any>;
 }
-
-const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
 
 /** Task-token errors that mean "stale token" — swallowed, wakes converge. */
 function isStaleTokenError(err: unknown): boolean {
@@ -179,9 +179,7 @@ export async function rerunRun(
 
   if (options.failed) {
     const rows = await listJobRows(deps.dynamo, deps.tableName, coords);
-    const anyFailed = rows.some((row) =>
-      ['FAILED', 'TIMED_OUT', 'CANCELLED'].includes(row.status),
-    );
+    const anyFailed = rows.some((row) => RERUNNABLE_JOB_STATUSES.includes(row.status));
     if (!anyFailed) {
       throw new RunsCommandError(
         `Nothing failed in ${sourceRunId} — drop --failed to rerun everything`,

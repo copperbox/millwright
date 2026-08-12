@@ -14,6 +14,9 @@ import { TriggerKind } from './keys';
 
 export type RunStatus = 'PENDING' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
+/** Run statuses with no further transitions — the only rerun-able sources. */
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
+
 export type JobStatus =
   | 'PENDING'
   | 'QUEUED'
@@ -24,6 +27,12 @@ export type JobStatus =
   | 'TIMED_OUT'
   | 'CANCELLED'
   | 'SKIPPED';
+
+/**
+ * Job statuses `rerun --failed` re-executes (spec §7.7). Their SKIPPED
+ * dependents rerun with them; SUCCEEDED jobs' outputs are reused instead.
+ */
+export const RERUNNABLE_JOB_STATUSES: readonly JobStatus[] = ['FAILED', 'TIMED_OUT', 'CANCELLED'];
 
 export type StepStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'SKIPPED';
 

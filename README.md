@@ -46,3 +46,14 @@ The deployed construct self-registers a manifest at
 `/millwright/<name>/manifest`; the CLI discovers it with zero configuration
 when the account+region has exactly one deployment (otherwise set
 `MILLWRIGHT_DEPLOYMENT` or pass `--deployment`).
+
+## Operating runs
+
+```sh
+millwright runs cancel <run>            # stop in-flight builds; every job lands terminal
+millwright runs rerun <run> [--failed]  # new run from the stored job model — no re-synth
+```
+
+`<run>` is `owner/name#workflow#number`, or `workflow#number` with
+`--repo <owner/name>`. `--failed` reruns only the failed jobs and their
+skipped dependents, reusing the source run's succeeded outputs.

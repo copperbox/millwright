@@ -3,9 +3,11 @@ import {
   ConcurrencyGroupItem,
   EventIdentity,
   JobItem,
+  RERUNNABLE_JOB_STATUSES,
   RegistryItem,
   RunCoordinates,
   RunItem,
+  TERMINAL_RUN_STATUSES,
   ValidBusEvent,
   formatRunId,
   jobOutputPrefix,
@@ -249,6 +251,7 @@ async function processRerun(
   claimedRunIds: Readonly<Record<string, string>>,
   nowMs: number,
 ): Promise<Disposition> {
+  // validateBusEvent guarantees workflow and sourceRunNumber on rerun events.
   const sourceCoords: RunCoordinates = {
     repo: event.repo,
     workflow: event.workflow!,
@@ -259,7 +262,7 @@ async function processRerun(
   if (!source) {
     return { outcome: 'rejected', reason: `rerun source ${sourceId} does not exist` };
   }
-  if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(source.status)) {
+  if (!TERMINAL_RUN_STATUSES.includes(source.status)) {
     return {
       outcome: 'rejected',
       reason: `rerun source ${sourceId} is ${source.status}, not terminal`,
@@ -269,9 +272,7 @@ async function processRerun(
   let reuseJobs: readonly string[] | undefined;
   if (event.failedOnly) {
     const rows = await deps.store.listJobs(sourceCoords);
-    const anyFailed = rows.some((row) =>
-      ['FAILED', 'TIMED_OUT', 'CANCELLED'].includes(row.status),
-    );
+    const anyFailed = rows.some((row) => RERUNNABLE_JOB_STATUSES.includes(row.status));
     if (!anyFailed) {
       // The CLI rejects this up front; here it only survives a race.
       return { outcome: 'rejected', reason: `nothing failed in ${sourceId}; --failed rejects` };
@@ -292,8 +293,17 @@ async function processRerun(
     ...(reuseJobs && reuseJobs.length > 0 ? { reuseJobs } : {}),
     ...(source.inputs ? { inputs: source.inputs } : {}),
   };
-  let obtained = await obtainRun(deps, event, identity, source.workflow, claimedRunIds, nowMs, overrides);
+  let obtained = await obtainRun(
+    deps,
+    event,
+    identity,
+    source.workflow,
+    claimedRunIds,
+    nowMs,
+    overrides,
+  );
   if (!obtained.created) {
+    // A concurrent delivery recorded the run first — re-read and adopt it.
     const runIds = (await deps.store.claimEvent(identity, nowMs)).runIds;
     obtained = await obtainRun(deps, event, identity, source.workflow, runIds, nowMs, overrides);
   }

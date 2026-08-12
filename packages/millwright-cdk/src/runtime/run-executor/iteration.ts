@@ -9,6 +9,7 @@ import {
   RunModel,
   RunModelJob,
   RunModelWorkflow,
+  TERMINAL_RUN_STATUSES,
   decide,
   formatRunId,
   jobKey,
@@ -149,8 +150,6 @@ export interface DeciderDeps {
 }
 
 export type IterationOutcome = 'parked' | 'terminal' | 'carry-over' | 'failed';
-
-const TERMINAL_RUN_STATUSES: readonly RunItem['status'][] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
 
 /** The decider's SendTaskSuccess payloads — what the state machine routes on. */
 export type DeciderOutput =

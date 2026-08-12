@@ -63,6 +63,7 @@ export {
   EventDedupeItem,
   JobItem,
   JobStatus,
+  RERUNNABLE_JOB_STATUSES,
   RegistryItem,
   RegistryWorkflowEntry,
   RunCounterItem,
@@ -71,6 +72,7 @@ export {
   SkipReason,
   StepItem,
   StepStatus,
+  TERMINAL_RUN_STATUSES,
 } from './items';
 export {
   BuildOutcome,
