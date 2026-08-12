@@ -65,6 +65,76 @@ describe('parseRunModel', () => {
     const model = parseRunModel(MODEL);
     expect(() => workflowFromModel(model, 'release')).toThrow(/no workflow "release"/);
   });
+
+  it('narrows cache, produced artifacts and secret references', () => {
+    const model = parseRunModel({
+      schemaVersion: 1,
+      repo: 'octo/app',
+      workflows: [
+        {
+          name: 'ci',
+          jobs: [
+            {
+              name: 'build',
+              image: 'node:22',
+              steps: ['npm ci'],
+              cache: {
+                key: 'npm-abc123',
+                paths: ['node_modules'],
+                restoreKeys: ['npm-', 42],
+              },
+              produces: [{ name: 'dist', paths: ['dist', 'build/lib'] }],
+              secrets: {
+                NPM_TOKEN: { parameter: 'npm-token' },
+                SHARED: { parameter: 'db-url', scope: 'platform' },
+                DOCKERHUB: { secretsManager: 'arn:aws:secretsmanager:us-east-1:1:secret:x' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const job = workflowFromModel(model, 'ci').jobs[0];
+    expect(job.cache).toEqual({ key: 'npm-abc123', paths: ['node_modules'], restoreKeys: ['npm-'] });
+    expect(job.produces).toEqual([{ name: 'dist', paths: ['dist', 'build/lib'] }]);
+    expect(job.secrets).toEqual({
+      NPM_TOKEN: { parameter: 'npm-token' },
+      SHARED: { parameter: 'db-url', scope: 'platform' },
+      DOCKERHUB: { secretsManager: 'arn:aws:secretsmanager:us-east-1:1:secret:x' },
+    });
+  });
+
+  it('drops malformed cache, artifact and secret shapes rather than guessing', () => {
+    const model = parseRunModel({
+      schemaVersion: 1,
+      repo: 'octo/app',
+      workflows: [
+        {
+          name: 'ci',
+          jobs: [
+            {
+              name: 'build',
+              image: 'node:22',
+              steps: ['npm ci'],
+              // No key → uninterpretable → no cache at all (fail closed).
+              cache: { paths: ['node_modules'] },
+              produces: [{ name: 'dist' }, { name: 'ok', paths: ['out'] }, 'junk'],
+              secrets: {
+                GOOD: { parameter: 'npm-token' },
+                EMPTY: {},
+                WRONG: { parameter: 7 },
+                STRINGY: 'not-a-ref',
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const job = workflowFromModel(model, 'ci').jobs[0];
+    expect(job.cache).toBeUndefined();
+    expect(job.produces).toEqual([{ name: 'ok', paths: ['out'] }]);
+    expect(job.secrets).toEqual({ GOOD: { parameter: 'npm-token' } });
+  });
 });
 
 describe('caps and defaults', () => {
