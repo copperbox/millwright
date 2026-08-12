@@ -35,6 +35,7 @@ export {
   registryKey,
   runCounterKey,
   runKey,
+  runPartitionKey,
   stepKey,
   stepSortKeyPrefix,
 } from './keys';

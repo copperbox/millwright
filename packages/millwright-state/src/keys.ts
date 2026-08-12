@@ -201,7 +201,8 @@ export function parseRunId(runId: string): RunCoordinates {
 
 // --- Job: RUN#<repo>#<workflow>#<number> / JOB#<name> ---------------------
 
-function runPartitionKey(run: RunCoordinates): string {
+/** `RUN#<repo>#<workflow>#<number>` — the partition holding job + step rows. */
+export function runPartitionKey(run: RunCoordinates): string {
   assertSegment('repo', run.repo);
   assertSegment('workflow', run.workflow);
   assertRunNumber(run.runNumber);
