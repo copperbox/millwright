@@ -32,6 +32,35 @@ export interface RunModelCompute {
   readonly size?: 'small' | 'medium' | 'large';
 }
 
+/**
+ * Keyed dependency cache (spec §12): GHA-style semantics. `key` arrives fully
+ * resolved — `hashFiles(...)` is evaluated at synth, where the repo content
+ * is — and `restoreKeys` are prefix fallbacks tried in order on an
+ * exact-key miss. An exact hit skips the save phase.
+ */
+export interface RunModelCache {
+  readonly key: string;
+  readonly paths: readonly string[];
+  readonly restoreKeys?: readonly string[];
+}
+
+/** One declared artifact: uploaded to `out/<job>/<name>/` after the steps. */
+export interface RunModelArtifact {
+  readonly name: string;
+  readonly paths: readonly string[];
+}
+
+/**
+ * One declared secret, keyed by the env var it lands in (spec §11.2).
+ * `Secret.named(x)` emits a parameter reference (`scope` defaults to the
+ * repo); `Secret.fromSecretsManager(arn)` emits a passthrough ARN. Which
+ * refs actually receive grants is decided elsewhere (§12a) — nothing here
+ * is trusted beyond naming what the job would like.
+ */
+export type RunModelSecret =
+  | { readonly parameter: string; readonly scope?: string }
+  | { readonly secretsManager: string };
+
 export interface RunModelJob {
   readonly name: string;
   /** Plain docker-run image string; required for user jobs (§11.1). */
@@ -50,6 +79,9 @@ export interface RunModelJob {
   /** Artifact edges; the producing job is a dependency like any other. */
   readonly consumes?: readonly { readonly job: string; readonly artifact: string }[];
   readonly env?: Readonly<Record<string, string>>;
+  readonly produces?: readonly RunModelArtifact[];
+  readonly cache?: RunModelCache;
+  readonly secrets?: Readonly<Record<string, RunModelSecret>>;
 }
 
 export interface RunModelWorkflow {
@@ -132,6 +164,72 @@ function narrowSteps(value: unknown): RunModelStep[] | undefined {
   return steps;
 }
 
+function narrowStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const strings = value.filter((entry): entry is string => typeof entry === 'string' && !!entry);
+  return strings.length > 0 ? strings : undefined;
+}
+
+/** Malformed cache shapes narrow to "no cache" — fail closed, never guess. */
+function narrowCache(value: unknown): RunModelCache | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const c = value as Record<string, unknown>;
+  const paths = narrowStringArray(c.paths);
+  if (typeof c.key !== 'string' || !c.key || !paths) {
+    return undefined;
+  }
+  const restoreKeys = narrowStringArray(c.restoreKeys);
+  return { key: c.key, paths, ...(restoreKeys ? { restoreKeys } : {}) };
+}
+
+function narrowArtifacts(value: unknown): RunModelArtifact[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const artifacts = value.flatMap((entry): RunModelArtifact[] => {
+    if (typeof entry !== 'object' || entry === null) {
+      return [];
+    }
+    const name = (entry as { name?: unknown }).name;
+    const paths = narrowStringArray((entry as { paths?: unknown }).paths);
+    return typeof name === 'string' && name && paths ? [{ name, paths }] : [];
+  });
+  return artifacts.length > 0 ? artifacts : undefined;
+}
+
+/**
+ * Malformed secret references are dropped, not repaired: a missing env var
+ * fails the job visibly at its own step, whereas guessing a reference could
+ * resolve a parameter the definition never named.
+ */
+function narrowSecrets(value: unknown): Record<string, RunModelSecret> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const secrets: Record<string, RunModelSecret> = {};
+  for (const [envName, ref] of Object.entries(value)) {
+    if (typeof ref !== 'object' || ref === null) {
+      continue;
+    }
+    const parameter = (ref as { parameter?: unknown }).parameter;
+    const scope = (ref as { scope?: unknown }).scope;
+    const secretsManager = (ref as { secretsManager?: unknown }).secretsManager;
+    if (typeof parameter === 'string' && parameter) {
+      secrets[envName] = {
+        parameter,
+        ...(typeof scope === 'string' && scope ? { scope } : {}),
+      };
+    } else if (typeof secretsManager === 'string' && secretsManager) {
+      secrets[envName] = { secretsManager };
+    }
+  }
+  return Object.keys(secrets).length > 0 ? secrets : undefined;
+}
+
 function narrowJob(value: unknown): RunModelJob | undefined {
   if (typeof value !== 'object' || value === null) {
     return undefined;
@@ -176,6 +274,9 @@ function narrowJob(value: unknown): RunModelJob | undefined {
             ),
           )
         : undefined,
+    produces: narrowArtifacts(j.produces),
+    cache: narrowCache(j.cache),
+    secrets: narrowSecrets(j.secrets),
   };
 }
 

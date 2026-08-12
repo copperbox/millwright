@@ -85,6 +85,7 @@ describe('manifest parameter', () => {
         pollingTable: 'millwright-polling',
         artifactBucket: 'TOKEN',
         buildLogGroup: '/millwright/millwright/builds',
+        buildProject: 'millwright-builds',
         configKeyArn: 'TOKEN',
         configKeyAlias: 'alias/millwright/millwright',
         eventBus: 'millwright-bus',
@@ -148,6 +149,11 @@ describe('run executor wiring', () => {
   it('deploys the state machine under the exact name the launcher pinned', () => {
     const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
     expect(millwright.runExecutor.stateMachineName).toBe(millwright.launcher.runExecutorName);
+  });
+
+  it('deploys the build project under the exact name the run executor pinned', () => {
+    const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
+    expect(millwright.buildProject.projectName).toBe(millwright.runExecutor.buildProjectName);
   });
 });
 

@@ -5,21 +5,29 @@ import {
   StartBuildCommand,
   StopBuildCommand,
 } from '@aws-sdk/client-codebuild';
-import { BuildOutcome, RunModelCompute, RunModelJob } from '@copperbox/millwright-state';
+import {
+  BuildOutcome,
+  RunModelCompute,
+  RunModelJob,
+  SHIM_SOURCE_IDENTIFIER,
+  dataPlaneEnvironment,
+  isReservedEnvName,
+  renderJobBuildspec,
+  runInputSourceLocation,
+  shimSourceLocation,
+} from '@copperbox/millwright-state';
 import { BuildRunner, BuildSnapshot, DispatchContext } from './iteration';
 
 /**
  * Per-job dispatch onto the single CodeBuild project (spec §7.4): everything
  * per-run rides `StartBuild` overrides — image, ARM↔x86 environment type,
- * compute size, privileged mode, timeout, and `imagePullCredentialsType:
- * SERVICE_ROLE` (without which job-role ECR grants are inert).
- *
- * The buildspec here is the interim renderer: steps run plainly, without the
- * shim wrap, source unpack, or cache phases. The shared control-plane
- * buildspec library (§7.4, its own issue) replaces `renderInterimBuildspec`
- * wholesale; nothing else in the dispatch path changes. Job-role variant
- * selection at dispatch belongs to the IAM issue and plugs in as a
- * `serviceRoleOverride` when it lands.
+ * compute size, privileged mode, timeout, service role (once the IAM issue's
+ * variant selection supplies one), `imagePullCredentialsType: SERVICE_ROLE`
+ * (without which job-role ECR grants are inert), the inline buildspec from
+ * the shared control-plane renderer, and the two source locations: the run's
+ * `in/` prefix as primary (model + packaged source, materialized by the
+ * CodeBuild agent under the build's role) and the shim delivery prefix as
+ * the S3 secondary source.
  */
 
 const BATCH_GET_LIMIT = 100;
@@ -52,39 +60,56 @@ function computeTypeFor(size: RunModelCompute['size']): ComputeType {
   }
 }
 
-export function renderInterimBuildspec(job: RunModelJob): string {
-  return JSON.stringify({
-    version: '0.2',
-    phases: { build: { commands: job.steps.map((step) => step.run) } },
-  });
+export interface CodeBuildRunnerConfig {
+  /** The single project's pinned name, `<deploymentName>-builds`. */
+  readonly projectName: string;
+  /** The artifact/cache bucket — sources in, artifacts and caches out. */
+  readonly bucketName: string;
+  /** Roots the SSM paths the renderer resolves secret references to. */
+  readonly deploymentName: string;
 }
 
 export class CodeBuildRunner implements BuildRunner {
   constructor(
     private readonly client: CodeBuildClient,
-    private readonly projectName: string,
+    private readonly config: CodeBuildRunnerConfig,
   ) {}
 
   async start(
     job: RunModelJob,
     ctx: DispatchContext,
   ): Promise<{ buildId: string; buildArn?: string }> {
+    const { projectName, bucketName, deploymentName } = this.config;
+    // Identity and data-plane roots first; declared env after, minus the
+    // reserved namespaces — a definition must not overwrite job identity,
+    // agent state or the build role's credentials.
     const environment = [
-      { name: 'MILLWRIGHT_RUN_ID', value: ctx.runId, type: 'PLAINTEXT' as const },
-      { name: 'MILLWRIGHT_JOB', value: job.name, type: 'PLAINTEXT' as const },
-      { name: 'MILLWRIGHT_SHA', value: ctx.sha, type: 'PLAINTEXT' as const },
-      { name: 'MILLWRIGHT_REF', value: ctx.ref, type: 'PLAINTEXT' as const },
-      ...Object.entries(job.env ?? {}).map(([name, value]) => ({
+      { name: 'MILLWRIGHT_RUN_ID', value: ctx.runId },
+      { name: 'MILLWRIGHT_JOB', value: job.name },
+      { name: 'MILLWRIGHT_SHA', value: ctx.sha },
+      { name: 'MILLWRIGHT_REF', value: ctx.ref },
+      ...Object.entries(dataPlaneEnvironment(ctx.coords, bucketName)).map(([name, value]) => ({
         name,
         value,
-        type: 'PLAINTEXT' as const,
       })),
-    ];
+      ...Object.entries(job.env ?? {})
+        .filter(([name]) => !isReservedEnvName(name))
+        .map(([name, value]) => ({ name, value })),
+    ].map((entry) => ({ ...entry, type: 'PLAINTEXT' as const }));
+
     const result = await this.client.send(
       new StartBuildCommand({
-        projectName: this.projectName,
-        buildspecOverride: renderInterimBuildspec(job),
-        sourceTypeOverride: 'NO_SOURCE',
+        projectName,
+        buildspecOverride: renderJobBuildspec(job, { deploymentName, repo: ctx.coords.repo }),
+        sourceTypeOverride: 'S3',
+        sourceLocationOverride: runInputSourceLocation(ctx.coords, bucketName),
+        secondarySourcesOverride: [
+          {
+            type: 'S3',
+            location: shimSourceLocation(bucketName),
+            sourceIdentifier: SHIM_SOURCE_IDENTIFIER,
+          },
+        ],
         ...(job.image ? { imageOverride: job.image } : {}),
         environmentTypeOverride:
           job.compute?.arch === 'x86_64' ? 'LINUX_CONTAINER' : 'ARM_CONTAINER',
@@ -92,6 +117,7 @@ export class CodeBuildRunner implements BuildRunner {
         privilegedModeOverride: job.privileged === true,
         ...(job.timeoutMinutes ? { timeoutInMinutesOverride: job.timeoutMinutes } : {}),
         imagePullCredentialsTypeOverride: 'SERVICE_ROLE',
+        ...(ctx.serviceRoleArn ? { serviceRoleOverride: ctx.serviceRoleArn } : {}),
         environmentVariablesOverride: environment,
       }),
     );

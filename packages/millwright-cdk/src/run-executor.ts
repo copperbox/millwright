@@ -30,13 +30,15 @@ export interface RunExecutorProps {
  * handler on the default bus's CodeBuild build-state rule.
  *
  * The machine's name honors the `<deploymentName>-run-executor` contract the
- * launcher pinned. Two further physical names are pinned HERE, ahead of the
- * consists that create them — they must use these exact names:
+ * launcher pinned. Two further physical names are pinned HERE and must be
+ * used exactly:
  *
  * - `<deploymentName>-builds` — the CodeBuild project (C11) the decider
- *   dispatches onto and the build-events rule filters on.
+ *   dispatches onto and the build-events rule filters on; created by the
+ *   `BuildProject` construct under this same name.
  * - `<deploymentName>-synth` / `<deploymentName>-post-synth` — the synth
- *   phase Lambdas the machine invokes. `-synth` receives
+ *   phase Lambdas the machine invokes, pinned ahead of the consist that
+ *   creates them. `-synth` receives
  *   `{ taskToken, input }` and must complete the token when the synth build
  *   lands; `-post-synth` validates the model, writes the registry entry and
  *   reports the synth check (spec §7.2).
@@ -89,6 +91,7 @@ export class RunExecutor extends Construct {
         STATE_TABLE_NAME: props.stateTable.tableName,
         ARTIFACT_BUCKET_NAME: props.artifactBucket.bucketName,
         BUILD_PROJECT_NAME: this.buildProjectName,
+        DEPLOYMENT_NAME: name,
         METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),
       },
       bundling: {

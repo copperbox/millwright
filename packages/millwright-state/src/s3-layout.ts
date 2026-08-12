@@ -17,6 +17,21 @@ import { KeyFormatError, RunCoordinates } from './keys';
 export const RUNS_PREFIX = 'runs/';
 export const CACHE_PREFIX = 'cache/';
 
+/**
+ * `control/` — control-plane-owned objects, written at deploy/release time,
+ * never per run. Deliberately outside the `runs/` and `cache/` lifecycle
+ * rules so nothing here ever ages out.
+ */
+export const CONTROL_PREFIX = 'control/';
+
+/**
+ * `control/shim/` — the step-shim delivery prefix (spec §11.2). CodeBuild
+ * materializes it into every job as an S3 secondary source; the local runner
+ * bind-mounts the same content. Job roles read it and nothing else under
+ * `control/`.
+ */
+export const SHIM_PREFIX = `${CONTROL_PREFIX}shim/`;
+
 export const MODEL_OBJECT_NAME = 'model.json';
 export const SOURCE_OBJECT_NAME = 'source.tar.gz';
 

@@ -62,7 +62,11 @@ function dependencies(): DeciderDeps {
       : DEFAULT_METADATA_RETENTION_DAYS;
     deps = {
       store: new DynamoDeciderStore(dynamo, requireEnv('STATE_TABLE_NAME'), metadataRetentionDays),
-      runner: new CodeBuildRunner(new CodeBuildClient({}), requireEnv('BUILD_PROJECT_NAME')),
+      runner: new CodeBuildRunner(new CodeBuildClient({}), {
+        projectName: requireEnv('BUILD_PROJECT_NAME'),
+        bucketName: requireEnv('ARTIFACT_BUCKET_NAME'),
+        deploymentName: requireEnv('DEPLOYMENT_NAME'),
+      }),
       models: new S3ModelSource(new S3Client({}), requireEnv('ARTIFACT_BUCKET_NAME')),
       sender: new SfnTokenSender(new SFNClient({})),
       iterationBudget: process.env.ITERATION_BUDGET
