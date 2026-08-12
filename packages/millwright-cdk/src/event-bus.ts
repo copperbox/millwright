@@ -13,8 +13,8 @@ export interface MillwrightEventBusProps {
 
 /**
  * C3 — the deployment's event bus, carrying `push` / `branch` / `tag` / `pr`
- * / `cron` / `dispatch` / `bootstrap` events plus `millwright.step` step
- * events (spec §7.1).
+ * / `cron` / `dispatch` / `bootstrap` / `rerun` events plus `millwright.step`
+ * step events (spec §7.1).
  *
  * The resource policy binds every source to its one legitimate emitter using
  * the documented `events:source` condition key, as explicit Denies so
