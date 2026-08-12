@@ -40,6 +40,25 @@ export function eventBusName(deployment: Deployment): string | undefined {
     : undefined;
 }
 
+/** A physical resource name carried in the manifest, if that component exists. */
+export function manifestResource(deployment: Deployment, key: string): string | undefined {
+  const resources = deployment.manifest.resources as Record<string, unknown> | undefined;
+  const value = resources?.[key];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+/** As `manifestResource`, but a hard requirement of the calling command. */
+export function requireManifestResource(deployment: Deployment, key: string, what: string): string {
+  const value = manifestResource(deployment, key);
+  if (value === undefined) {
+    throw new CommandError(
+      `Deployment "${deployment.name}" names no ${what} ("${key}") in its manifest — ` +
+        'redeploy with a current @copperbox/millwright-cdk.',
+    );
+  }
+  return value;
+}
+
 export async function getOptionalParameter(
   client: SsmClientLike,
   name: string,
