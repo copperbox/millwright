@@ -82,8 +82,25 @@ export {
   hostKeysParameterName,
   manifestParameterName,
   repoConfigParameterName,
+  repoFromConfigParameterName,
   secretParameterName,
 } from './ssm-paths';
+export {
+  ForkPrPolicy,
+  RepoConfig,
+  RepoConfigFormatError,
+  defaultRepoConfig,
+  parseRepoConfig,
+  serializeRepoConfig,
+} from './repo-config';
+export {
+  GithubAppCredentials,
+  GithubCredentials,
+  GithubCredentialsFormatError,
+  GithubPatCredentials,
+  parseGithubCredentials,
+  serializeGithubCredentials,
+} from './github-credentials';
 export {
   CACHE_PREFIX,
   MODEL_OBJECT_NAME,
