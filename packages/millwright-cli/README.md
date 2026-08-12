@@ -57,6 +57,45 @@ the App token carries REST-only work. Flags:
 `repo list` shows the configured repos, and `repo remove` deletes the
 config + key parameters and best-effort removes the GitHub-side deploy key.
 
+## Local execution
+
+`millwright run <wf>` is always local; `millwright dispatch <wf>` is always
+cloud — the verb split makes running in the wrong place impossible. The local
+host reuses the shared core end to end: the definition synths in-process, the
+same buildspec renderer authors each job's phases, the same pure decider
+drives the DAG (SKIPPED semantics, bounded retries, terminal states), and the
+same step shim reports step status — against `docker run` and
+`.millwright/runs/local-N.json` instead of CodeBuild and DynamoDB. Millwright
+makes zero AWS calls locally; image pulls go through your own docker config.
+
+- Source is the git-aware **working tree** (untracked-but-not-ignored files
+  ride along); `--clean` runs from `git archive HEAD` instead.
+- `--job X` runs one job, feeding its `consumes` from the newest prior local
+  run's artifacts; `--job X --with-deps` runs the ancestor subgraph instead.
+- Secrets come from the gitignored `.millwright/secrets.env` (or
+  `--secrets-file <path>`) as `KEY=VALUE` lines keyed by the declared env
+  var; missing declared secrets fail before any job starts. SSM and Secrets
+  Manager are never read.
+- Typed inputs for `Trigger.manual` workflows come from repeated
+  `--input k=v` flags; required choice inputs with no default prompt
+  interactively.
+- `--platform <p>` passes through to docker for exact-arch parity;
+  `--parallel N` bounds concurrent jobs (default: CPU count); `--as-tag <t>`
+  fakes a tag ref for the run context. Privileged jobs mount the host docker
+  socket (a fidelity note is printed). Concurrency groups are carried, not
+  enforced, locally.
+- Ctrl-C sets `cancelRequested` through the same decider path as
+  `runs cancel`: in-flight containers stop and every state lands terminal.
+- Run ids are `local-N`, monotonic per clone, gitignored under
+  `.millwright/`, never mixed into `runs list`; `millwright runs show
+  local-N` reads the state file. Artifacts land under
+  `.millwright/runs/local-N/out/<job>/<artifact>/` (the cloud layout), and
+  the keyed dependency cache persists across runs in `.millwright/cache/`.
+
+The step shim binds in from the millwright-cdk package's built delivery
+(`dist/shim`); point `MILLWRIGHT_SHIM_DIR` at a delivery directory to
+override.
+
 ## Observability
 
 The state table is the CLI's source of truth — there is no web UI. Runs are

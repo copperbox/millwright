@@ -34,6 +34,23 @@ describe('buildProgram', () => {
     expect(logs.options.find((option) => option.long === '--follow')!.short).toBe('-f');
   });
 
+  it('exposes the spec §15 local execution surface: run with its inner-loop flags', () => {
+    expect(names).toContain('run');
+    const run = program.commands.find((command) => command.name() === 'run')!;
+    expect(run.options.map((option) => option.long)).toEqual(
+      expect.arrayContaining([
+        '--job',
+        '--with-deps',
+        '--clean',
+        '--platform',
+        '--secrets-file',
+        '--input',
+        '--as-tag',
+        '--parallel',
+      ]),
+    );
+  });
+
   it('secrets set takes --scope', () => {
     const secrets = program.commands.find((command) => command.name() === 'secrets')!;
     const set = secrets.commands.find((command) => command.name() === 'set')!;
