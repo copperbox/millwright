@@ -1,0 +1,35 @@
+{
+  "name": "@copperbox/millwright-cli",
+  "version": "0.1.0",
+  "description": "millwright CLI — operate a millwright deployment from operator and developer machines",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/copperbox/millwright.git",
+    "directory": "packages/millwright-cli"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "millwright": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.700.0",
+    "@copperbox/millwright-state": "^0.1.0",
+    "commander": "^12.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
