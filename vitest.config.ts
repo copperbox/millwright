@@ -10,6 +10,10 @@ export default defineConfig({
         __dirname,
         'packages/millwright-state/src/index.ts',
       ),
+      '@copperbox/millwright-workflows': path.resolve(
+        __dirname,
+        'packages/millwright-workflows/src/index.ts',
+      ),
     },
   },
 });
