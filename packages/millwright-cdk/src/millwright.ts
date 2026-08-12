@@ -12,6 +12,7 @@ import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
 import { Poller } from './poller';
+import { SynthJob } from './synth-job';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -92,6 +93,8 @@ export class Millwright extends Construct {
   readonly configKey: kms.Key;
   /** C17 — the log group receiving one stream per build. */
   readonly buildLogGroup: logs.LogGroup;
+  /** C11 + the synth phase (spec §7.2): project, synth job, post-synth step. */
+  readonly synthJob: SynthJob;
   /** C3 — the event bus with its source-conditioned resource policy. */
   readonly eventBus: MillwrightEventBus;
   /** C4 — the launcher consuming trigger events from the bus. */
@@ -161,6 +164,16 @@ export class Millwright extends Construct {
     this.artifactBucket = stores.artifactBucket;
     this.configKey = stores.configKey;
     this.buildLogGroup = stores.buildLogGroup;
+
+    this.synthJob = new SynthJob(this, 'SynthJob', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      artifactBucket: this.artifactBucket,
+      configKey: this.configKey,
+      buildLogGroup: this.buildLogGroup,
+      metadataRetention: this.metadataRetention,
+      pollCadence: this.pollCadence,
+    });
 
     this.eventBus = new MillwrightEventBus(this, 'EventBus', {
       deploymentName: this.deploymentName,
