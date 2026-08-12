@@ -26,6 +26,7 @@
     "constructs": "^10.0.0"
   },
   "devDependencies": {
+    "@aws-sdk/client-iam": "^3.1108.0",
     "aws-cdk-lib": "^2.170.0",
     "constructs": "^10.4.0"
   },
