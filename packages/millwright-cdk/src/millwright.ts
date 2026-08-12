@@ -11,6 +11,7 @@ import { Boundary } from './boundary';
 import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
+import { RunExecutor } from './run-executor';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -95,6 +96,8 @@ export class Millwright extends Construct {
   readonly eventBus: MillwrightEventBus;
   /** C4 — the launcher consuming trigger events from the bus. */
   readonly launcher: Launcher;
+  /** C5–C7 — the run executor machine, decider, and build-events handler. */
+  readonly runExecutor: RunExecutor;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -165,6 +168,12 @@ export class Millwright extends Construct {
     this.launcher = new Launcher(this, 'Launcher', {
       deploymentName: this.deploymentName,
       bus: this.eventBus.bus,
+      stateTable: this.stateTable,
+      artifactBucket: this.artifactBucket,
+      metadataRetention: this.metadataRetention,
+    });
+    this.runExecutor = new RunExecutor(this, 'RunExecutor', {
+      deploymentName: this.deploymentName,
       stateTable: this.stateTable,
       artifactBucket: this.artifactBucket,
       metadataRetention: this.metadataRetention,

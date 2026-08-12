@@ -144,6 +144,13 @@ describe('defaults', () => {
   });
 });
 
+describe('run executor wiring', () => {
+  it('deploys the state machine under the exact name the launcher pinned', () => {
+    const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
+    expect(millwright.runExecutor.stateMachineName).toBe(millwright.launcher.runExecutorName);
+  });
+});
+
 describe('lockstep version', () => {
   it('keeps the embedded VERSION in sync with package.json', () => {
     expect(VERSION).toBe(cdkPkg.version);
