@@ -47,6 +47,39 @@ export function hostKeysParameterValue(sshKeys: readonly string[]): string {
   return sshKeys.map((key) => `github.com ${key}`).join('\n');
 }
 
+/**
+ * `millwright refresh-host-keys` (spec §6.1, §15): re-pin GitHub's SSH host
+ * keys from /meta — the manual hatch for confirmed key rotations. The poller
+ * and synth job read the pins from SSM on their next tick/clone, so no
+ * redeploy is involved.
+ */
+export async function refreshHostKeys(
+  deps: Pick<SetupDeps, 'ssm' | 'fetchLike' | 'output'>,
+  options: DiscoverOptions = {},
+): Promise<void> {
+  const deployment = await discoverDeployment(deps.ssm, options);
+  const parameter = hostKeysParameterName(deployment.name);
+  const previous = await getOptionalParameter(deps.ssm, parameter);
+  const meta = await getGithubMeta(deps.fetchLike);
+  const value = hostKeysParameterValue(meta.sshKeys);
+  await putStringParameter(
+    deps.ssm,
+    parameter,
+    value,
+    `pinned GitHub SSH host keys (${deployment.name})`,
+  );
+  if (previous === value) {
+    deps.output(
+      `Host keys unchanged — ${meta.sshKeys.length} pins at ${parameter} already match /meta.`,
+    );
+    return;
+  }
+  deps.output(
+    `${previous === undefined ? 'Pinned' : 'Re-pinned'} ${meta.sshKeys.length} GitHub SSH host ` +
+      `keys at ${parameter}; the poller honors them on its next tick.`,
+  );
+}
+
 export async function setup(deps: SetupDeps, options: SetupOptions = {}): Promise<void> {
   const deployment = await discoverDeployment(deps.ssm, options);
   const keyId = configKeyId(deployment);

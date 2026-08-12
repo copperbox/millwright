@@ -2,7 +2,7 @@ import { parseGithubCredentials } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
 import { CommandError } from '../src/config-plane';
 import { FetchLike } from '../src/github/rest';
-import { hostKeysParameterValue, setup, SetupDeps } from '../src/setup';
+import { hostKeysParameterValue, refreshHostKeys, setup, SetupDeps } from '../src/setup';
 import { FakeSsm } from './fake-ssm';
 
 const META = { ssh_keys: ['ssh-ed25519 AAAmeta', 'ecdsa-sha2-nistp256 BBBmeta'] };
@@ -105,5 +105,30 @@ describe('setup --pat', () => {
 describe('hostKeysParameterValue', () => {
   it('prefixes each /meta key with the host for known_hosts-style pins', () => {
     expect(hostKeysParameterValue(['ssh-ed25519 K1'])).toBe('github.com ssh-ed25519 K1');
+  });
+});
+
+describe('refresh-host-keys', () => {
+  it('re-pins from /meta and notes the poller picks pins up next tick', async () => {
+    const ssm = new FakeSsm();
+    ssm.setManifest('prod');
+    ssm.set('/millwright/prod/github/host-keys', 'github.com ssh-ed25519 STALE');
+    const deps = makeDeps(ssm);
+    await refreshHostKeys(deps, {});
+    expect(ssm.parameters.get('/millwright/prod/github/host-keys')!.Value).toBe(
+      'github.com ssh-ed25519 AAAmeta\ngithub.com ecdsa-sha2-nistp256 BBBmeta',
+    );
+    expect(deps.lines[0]).toMatch(/^Re-pinned 2 GitHub SSH host keys .*next tick\.$/);
+  });
+
+  it('says so when the pins already match /meta', async () => {
+    const ssm = new FakeSsm();
+    ssm.setManifest('prod');
+    const deps = makeDeps(ssm);
+    await refreshHostKeys(deps, {});
+    expect(deps.lines[0]).toMatch(/^Pinned 2 GitHub SSH host keys/);
+    deps.lines.length = 0;
+    await refreshHostKeys(deps, {});
+    expect(deps.lines[0]).toMatch(/^Host keys unchanged — 2 pins/);
   });
 });
