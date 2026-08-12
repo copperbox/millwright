@@ -67,6 +67,8 @@ export interface RunItem extends ExpiringItem {
   readonly rerunOf?: string;
   /** e.g. `superseded` on concurrency-policy cancellation. */
   readonly reason?: string;
+  /** Typed inputs carried by a `dispatch` trigger. */
+  readonly inputs?: Readonly<Record<string, string | boolean>>;
   /** Current Step Functions task token; rewritten every decider iteration. */
   readonly taskToken?: string;
 }
@@ -106,12 +108,16 @@ export interface StepItem extends ExpiringItem {
 }
 
 /**
- * `EVENT#<repo>#<ref>#<sha>#<kind>` / `-` — conditional-put dedupe record,
- * TTL 30 min. Doubles as the processing record: the run id is written on
- * creation so launcher retries resume idempotently.
+ * `EVENT#<repo>#<ref>#<sha>#<kind>[#<qualifier>]` / `-` — conditional-put
+ * dedupe record, TTL 30 min. A processing record, not a tombstone: each
+ * matched workflow's run id is written under `runIds` as its run is created,
+ * so a launcher crash-and-redeliver resumes idempotently instead of dropping
+ * the event. The launcher writes `runIds: {}` at claim time so later
+ * per-workflow SETs can target map paths unconditionally.
  */
 export interface EventDedupeItem extends ExpiringItem {
-  readonly runId?: string;
+  /** Workflow name → run id, written transactionally with each run's creation. */
+  readonly runIds?: Readonly<Record<string, string>>;
 }
 
 /** `BUILD#<build-id>` / `-` — run/job identity for the build-events handler. */

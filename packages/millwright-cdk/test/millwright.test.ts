@@ -87,6 +87,7 @@ describe('manifest parameter', () => {
         buildLogGroup: '/millwright/millwright/builds',
         configKeyArn: 'TOKEN',
         configKeyAlias: 'alias/millwright/millwright',
+        eventBus: 'millwright-bus',
       },
     });
   });
