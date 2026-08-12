@@ -82,6 +82,13 @@ export interface RunItem extends ExpiringItem {
   readonly reuseJobs?: readonly string[];
   /** e.g. `superseded` on concurrency-policy cancellation. */
   readonly reason?: string;
+  /**
+   * Evaluated concurrency-group key this run gates through (spec §8.4),
+   * stamped at creation when the matched workflow declares a group — the
+   * decider and sweep release exactly this slot on completion. Absent =
+   * unlimited concurrency.
+   */
+  readonly concurrencyGroup?: string;
   /** Typed inputs carried by a `dispatch` trigger. */
   readonly inputs?: Readonly<Record<string, string | boolean>>;
   /** Current Step Functions task token; rewritten every decider iteration. */

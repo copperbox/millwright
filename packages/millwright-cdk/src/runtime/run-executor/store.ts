@@ -8,8 +8,8 @@ import {
   jobKey,
   runKey,
 } from '@copperbox/millwright-state';
-import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { GetCommand, PutCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoGroupSlotStore } from '../shared/groups';
 import {
   JobProjectionPatch,
   isConditionalCheckFailure,
@@ -20,25 +20,13 @@ import { DeciderStore } from './iteration';
 
 /**
  * The decider's state-table access (spec §7.8 write partition: run + job
- * rows, `BUILD#` items). Dispatch claims are conditional on the exact
- * attempt count and terminal transitions on a live status, so concurrent
- * iterations — possible when a wake lands while a decider is still running —
- * can never double-dispatch an attempt or resurrect a finished run.
+ * rows, `BUILD#` items, group-slot releases via the shared base). Dispatch
+ * claims are conditional on the exact attempt count and terminal transitions
+ * on a live status, so concurrent iterations — possible when a wake lands
+ * while a decider is still running — can never double-dispatch an attempt or
+ * resurrect a finished run.
  */
-export class DynamoDeciderStore implements DeciderStore {
-  constructor(
-    private readonly client: DynamoDBDocumentClient,
-    private readonly tableName: string,
-    private readonly metadataRetentionDays: number,
-  ) {}
-
-  async getRun(coords: RunCoordinates): Promise<RunItem | undefined> {
-    const result = await this.client.send(
-      new GetCommand({ TableName: this.tableName, Key: runKey(coords), ConsistentRead: true }),
-    );
-    return result.Item as RunItem | undefined;
-  }
-
+export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderStore {
   async beginIteration(
     coords: RunCoordinates,
     taskToken: string,

@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import type { SFNClient } from '@aws-sdk/client-sfn';
 import { StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { RunItem, formatRunId } from '@copperbox/millwright-state';
-import { ExecutionStarter } from './launcher';
 
 /**
  * Step 7: `StartExecution` on the run executor, always under a deterministic,
@@ -17,6 +16,13 @@ import { ExecutionStarter } from './launcher';
  * registry entry and reports the `millwright / synth` check, dispatching no
  * jobs.
  */
+
+export interface ExecutionStarter {
+  /** Idempotent under a run-derived deterministic execution name. */
+  startRun(run: RunItem): Promise<void>;
+  /** Bootstrap synth-only execution, idempotently keyed by (repo, ref, sha). */
+  startSynthOnly(repo: string, ref: string, sha: string): Promise<void>;
+}
 
 export interface RunExecutionInput {
   readonly action: 'run';

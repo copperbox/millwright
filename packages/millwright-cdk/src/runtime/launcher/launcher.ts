@@ -17,7 +17,8 @@ import {
   validateBusEvent,
   withMetadataTtl,
 } from '@copperbox/millwright-state';
-import { MatchedWorkflow, evaluateGroupKey, matchWorkflows, workflowConcurrency } from './match';
+import { ExecutionStarter } from '../shared/executions';
+import { evaluateGroupKey, matchWorkflows, workflowConcurrency } from './match';
 
 /**
  * The launcher's pinned order (spec §7.1, council ruling B1 — validation
@@ -92,12 +93,7 @@ export interface LauncherStore {
   ): Promise<boolean>;
 }
 
-export interface ExecutionStarter {
-  /** Step 7 — idempotent under a run-derived deterministic execution name. */
-  startRun(run: RunItem): Promise<void>;
-  /** Bootstrap synth-only execution, idempotently keyed by (repo, ref, sha). */
-  startSynthOnly(repo: string, ref: string, sha: string): Promise<void>;
-}
+export type { ExecutionStarter };
 
 export interface ArtifactCopier {
   /**
@@ -228,12 +224,18 @@ export async function processBusEvent(
   const settled: string[] = [];
   let runIds = claim.runIds;
   for (const workflow of matched) {
-    let obtained = await obtainRun(deps, event, identity, workflow.workflow, runIds, nowMs);
+    // The group key is evaluated once, pre-creation, and stamped on the run
+    // record — the decider and sweep release exactly the slot that was
+    // claimed, immune to registry changes after the run exists.
+    const overrides: Partial<RunItem> = workflow.concurrency
+      ? { concurrencyGroup: evaluateGroupKey(workflow.concurrency.group, event, workflow.workflow) }
+      : {};
+    let obtained = await obtainRun(deps, event, identity, workflow.workflow, runIds, nowMs, overrides);
     if (!obtained.created) {
       // A concurrent delivery recorded a run for this workflow first — re-read
       // the processing record and adopt that run instead.
       runIds = (await deps.store.claimEvent(identity, nowMs)).runIds;
-      obtained = await obtainRun(deps, event, identity, workflow.workflow, runIds, nowMs);
+      obtained = await obtainRun(deps, event, identity, workflow.workflow, runIds, nowMs, overrides);
     }
     const run = obtained.run;
     if (!run) {
@@ -244,7 +246,7 @@ export async function processBusEvent(
       settled.push(formatRunId(run));
       continue;
     }
-    const outcome = await gate(deps, run, workflow, event, nowMs);
+    const outcome = await gate(deps, run, workflow.concurrency?.policy ?? 'queue', nowMs);
     (outcome === 'started' ? started : queued).push(formatRunId(run));
   }
   return { outcome: 'runs', started, queued, settled };
@@ -296,6 +298,24 @@ async function processRerun(
       .sort();
   }
 
+  // Reruns gate through concurrency groups like any other run (spec §7.7),
+  // under the ref's CURRENT registry entry — same lookup the original used.
+  const registry = await deps.store.getRegistryEntry(event.repo, source.ref);
+  const concurrency = registry ? workflowConcurrency(registry, source.workflow) : undefined;
+  if (concurrency === null) {
+    // Fail closed like matching does: never run without declared gating.
+    return {
+      outcome: 'rejected',
+      reason: `registry concurrency for ${source.workflow}@${source.ref} is uninterpretable`,
+    };
+  }
+  if (!registry) {
+    deps.log('no registry entry for rerun ref; gating without a group', {
+      repo: event.repo,
+      ref: source.ref,
+    });
+  }
+
   const overrides: Partial<RunItem> = {
     trigger: 'rerun',
     // The source run record is authoritative for what is being rerun; the
@@ -305,6 +325,9 @@ async function processRerun(
     rerunOf: sourceId,
     ...(reuseJobs && reuseJobs.length > 0 ? { reuseJobs } : {}),
     ...(source.inputs ? { inputs: source.inputs } : {}),
+    ...(concurrency
+      ? { concurrencyGroup: evaluateGroupKey(concurrency.group, event, source.workflow) }
+      : {}),
   };
   let obtained = await obtainRun(
     deps,
@@ -335,30 +358,7 @@ async function processRerun(
     await deps.copier.copyPrefix(jobOutputPrefix(sourceCoords, job), jobOutputPrefix(run, job));
   }
 
-  // Reruns gate through concurrency groups like any other run (spec §7.7),
-  // under the ref's CURRENT registry entry — same lookup the original used.
-  const registry = await deps.store.getRegistryEntry(event.repo, source.ref);
-  const concurrency = registry ? workflowConcurrency(registry, run.workflow) : undefined;
-  if (concurrency === null) {
-    // Fail closed like matching does: never run without declared gating.
-    return {
-      outcome: 'rejected',
-      reason: `registry concurrency for ${run.workflow}@${source.ref} is uninterpretable`,
-    };
-  }
-  if (!registry) {
-    deps.log('no registry entry for rerun ref; gating without a group', {
-      repo: event.repo,
-      ref: source.ref,
-    });
-  }
-  const outcome = await gate(
-    deps,
-    run,
-    concurrency ? { workflow: run.workflow, concurrency } : { workflow: run.workflow },
-    event,
-    nowMs,
-  );
+  const outcome = await gate(deps, run, concurrency?.policy ?? 'queue', nowMs);
   return {
     outcome: 'runs',
     started: outcome === 'started' ? [formatRunId(run)] : [],
@@ -425,16 +425,15 @@ async function obtainRun(
 async function gate(
   deps: LauncherDeps,
   run: RunItem,
-  workflow: MatchedWorkflow,
-  event: ValidBusEvent,
+  policy: 'queue' | 'supersede',
   nowMs: number,
 ): Promise<'started' | 'queued'> {
   // 6. Gate concurrency; 7. StartExecution. No group → unlimited concurrency.
-  if (!workflow.concurrency) {
+  const group = run.concurrencyGroup;
+  if (!group) {
     await deps.starter.startRun(run);
     return 'started';
   }
-  const group = evaluateGroupKey(workflow.concurrency.group, event, run.workflow);
   const me = formatRunId(run);
   for (let attempt = 1; attempt <= GROUP_CLAIM_ATTEMPTS; attempt++) {
     const state = await deps.store.getGroup(group);
@@ -461,8 +460,7 @@ async function gate(
         cancelReplaced: state?.pending ? parseRunId(state.pending) : undefined,
         // supersede: cancel the in-flight run via the standard
         // cancelRequested path; this run waits in pending for the hand-off.
-        requestCancelOf:
-          workflow.concurrency.policy === 'supersede' ? parseRunId(running) : undefined,
+        requestCancelOf: policy === 'supersede' ? parseRunId(running) : undefined,
       },
       nowMs,
     );

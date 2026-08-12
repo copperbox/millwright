@@ -4,6 +4,7 @@ import { S3Client } from '@aws-sdk/client-s3';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DEFAULT_METADATA_RETENTION_DAYS } from '@copperbox/millwright-state';
+import { SfnExecutionStarter } from '../shared/executions';
 import { isStaleTokenError } from '../shared/jobs';
 import { log, requireEnv } from '../shared/lambda';
 import { CodeBuildRunner } from './codebuild';
@@ -60,8 +61,11 @@ function dependencies(): DeciderDeps {
     const metadataRetentionDays = process.env.METADATA_RETENTION_DAYS
       ? Number(process.env.METADATA_RETENTION_DAYS)
       : DEFAULT_METADATA_RETENTION_DAYS;
+    const sfn = new SFNClient({});
     deps = {
       store: new DynamoDeciderStore(dynamo, requireEnv('STATE_TABLE_NAME'), metadataRetentionDays),
+      // Group hand-off: starts the pending run on this same state machine.
+      starter: new SfnExecutionStarter(sfn, requireEnv('RUN_EXECUTOR_ARN'), log),
       runner: new CodeBuildRunner(new CodeBuildClient({}), {
         projectName: requireEnv('BUILD_PROJECT_NAME'),
         bucketName: requireEnv('ARTIFACT_BUCKET_NAME'),
@@ -69,7 +73,7 @@ function dependencies(): DeciderDeps {
         eventBusName: requireEnv('EVENT_BUS_NAME'),
       }),
       models: new S3ModelSource(new S3Client({}), requireEnv('ARTIFACT_BUCKET_NAME')),
-      sender: new SfnTokenSender(new SFNClient({})),
+      sender: new SfnTokenSender(sfn),
       iterationBudget: process.env.ITERATION_BUDGET
         ? Number(process.env.ITERATION_BUDGET)
         : DEFAULT_ITERATION_BUDGET,

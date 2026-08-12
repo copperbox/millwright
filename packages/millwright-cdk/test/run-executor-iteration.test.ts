@@ -1,12 +1,15 @@
 import {
   BuildMappingItem,
   BuildOutcome,
+  ConcurrencyGroupItem,
   JobItem,
   RunCoordinates,
   RunItem,
   RunModel,
   RunModelJob,
   buildMappingKey,
+  concurrencyGroupKey,
+  formatRunId,
   jobKey,
   runKey,
 } from '@copperbox/millwright-state';
@@ -47,12 +50,13 @@ class MemoryStore implements DeciderStore {
   readonly runs = new Map<string, RunItem>();
   readonly jobs = new Map<string, JobItem>();
   readonly mappings = new Map<string, BuildMappingItem>();
+  readonly groups = new Map<string, { running?: string; pending?: string }>();
 
-  seedRun(overrides: Partial<RunItem> = {}): void {
-    const key = runKey(COORDS);
+  seedRun(overrides: Partial<RunItem> = {}, coords: RunCoordinates = COORDS): void {
+    const key = runKey(coords);
     this.runs.set(key.pk + key.sk, {
       ...key,
-      ...COORDS,
+      ...coords,
       status: 'PENDING',
       trigger: 'push',
       ref: 'refs/heads/main',
@@ -203,13 +207,51 @@ class MemoryStore implements DeciderStore {
     });
   }
 
+  async getGroup(group: string): Promise<ConcurrencyGroupItem | undefined> {
+    const state = this.groups.get(group);
+    return state ? { ...concurrencyGroupKey(group), ...state } : undefined;
+  }
+
+  async promotePending(
+    group: string,
+    expected: { running: string; pending: string },
+  ): Promise<boolean> {
+    const state = this.groups.get(group);
+    if (state?.running !== expected.running || state?.pending !== expected.pending) {
+      return false;
+    }
+    this.groups.set(group, { running: expected.pending });
+    return true;
+  }
+
+  async clearRunning(group: string, expectedRunning: string): Promise<boolean> {
+    const state = this.groups.get(group);
+    if (state?.running !== expectedRunning || state.pending !== undefined) {
+      return false;
+    }
+    this.groups.set(group, {});
+    return true;
+  }
+
+  async dropPending(
+    group: string,
+    expected: { running: string; pending: string },
+  ): Promise<boolean> {
+    const state = this.groups.get(group);
+    if (state?.running !== expected.running || state?.pending !== expected.pending) {
+      return false;
+    }
+    this.groups.set(group, { running: state.running });
+    return true;
+  }
+
   job(name: string): JobItem | undefined {
     const key = jobKey(COORDS, name);
     return this.jobs.get(key.pk + key.sk);
   }
 
-  run(): RunItem {
-    return this.runOf(COORDS)!;
+  run(coords: RunCoordinates = COORDS): RunItem {
+    return this.runOf(coords)!;
   }
 }
 
@@ -252,6 +294,18 @@ class FakeRunner implements BuildRunner {
   }
 }
 
+/** Records hand-off StartExecutions, idempotent like the SFN starter. */
+class FakeStarter {
+  readonly startedRuns: string[] = [];
+
+  async startRun(run: RunItem): Promise<void> {
+    const id = formatRunId(run);
+    if (!this.startedRuns.includes(id)) {
+      this.startedRuns.push(id);
+    }
+  }
+}
+
 class FakeSender implements TokenSender {
   readonly successes: { taskToken: string; output: unknown }[] = [];
   readonly failures: { taskToken: string; error: string; cause: string }[] = [];
@@ -269,6 +323,7 @@ function harness(model: RunModel | null = MODEL) {
   const store = new MemoryStore();
   const runner = new FakeRunner();
   const sender = new FakeSender();
+  const starter = new FakeStarter();
   const deps: DeciderDeps = {
     store,
     runner,
@@ -281,10 +336,11 @@ function harness(model: RunModel | null = MODEL) {
       },
     },
     sender,
+    starter,
     iterationBudget: 100,
     log: () => {},
   };
-  return { store, runner, sender, deps };
+  return { store, runner, sender, starter, deps };
 }
 
 function iterate(
@@ -539,5 +595,83 @@ describe('decider iteration — cancellation and carry-over', () => {
     const second = carryOverExecutionName(first);
     expect(first).not.toBe(second);
     expect(carryOverExecutionName('run-abc-123')).toBe(first);
+  });
+});
+
+describe('decider iteration — concurrency-group hand-off (spec §8.4)', () => {
+  const GROUP = 'deploy-octo/app';
+  const PENDING_COORDS: RunCoordinates = { repo: 'octo/app', workflow: 'ci', runNumber: 8 };
+  const PENDING_ID = 'octo/app#ci#8';
+
+  it('clears the running slot on completion when no run is waiting', async () => {
+    const { store, starter, deps } = harness();
+    store.seedRun({ concurrencyGroup: GROUP, cancelRequested: true });
+    store.groups.set(GROUP, { running: RUN_ID });
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(store.groups.get(GROUP)).toEqual({});
+    expect(starter.startedRuns).toEqual([]);
+  });
+
+  it('starts the pending run and promotes it into the running slot (serialization)', async () => {
+    const { store, starter, deps } = harness();
+    store.seedRun({ concurrencyGroup: GROUP, cancelRequested: true });
+    store.seedRun({ status: 'QUEUED', concurrencyGroup: GROUP }, PENDING_COORDS);
+    store.groups.set(GROUP, { running: RUN_ID, pending: PENDING_ID });
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(starter.startedRuns).toEqual([PENDING_ID]);
+    expect(store.groups.get(GROUP)).toEqual({ running: PENDING_ID });
+    // The handed-off run stays QUEUED until its own first iteration starts it.
+    expect(store.run(PENDING_COORDS).status).toBe('QUEUED');
+  });
+
+  it('leaves a slot held by another run untouched', async () => {
+    const { store, starter, deps } = harness();
+    store.seedRun({ concurrencyGroup: GROUP, cancelRequested: true });
+    store.groups.set(GROUP, { running: 'octo/app#ci#99' });
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(store.groups.get(GROUP)).toEqual({ running: 'octo/app#ci#99' });
+    expect(starter.startedRuns).toEqual([]);
+  });
+
+  it('releases the slot handed to a run that was cancelled while QUEUED', async () => {
+    const { store, sender, deps } = harness();
+    // A hand-off started this run after a CLI cancel landed: its only
+    // iteration takes the already-terminal early exit, which must release.
+    store.seedRun({ status: 'CANCELLED', concurrencyGroup: GROUP });
+    store.groups.set(GROUP, { running: RUN_ID });
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(store.groups.get(GROUP)).toEqual({});
+    expect(sender.successes.at(-1)?.output).toEqual({
+      outcome: 'terminal',
+      runStatus: 'CANCELLED',
+    });
+  });
+
+  it('drops a pending occupant whose run record no longer exists, then clears', async () => {
+    const { store, starter, deps } = harness();
+    store.seedRun({ concurrencyGroup: GROUP, cancelRequested: true });
+    store.groups.set(GROUP, { running: RUN_ID, pending: 'octo/app#ci#42' });
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(store.groups.get(GROUP)).toEqual({});
+    expect(starter.startedRuns).toEqual([]);
+  });
+
+  it('never fails the completion when the release contends past its attempts', async () => {
+    const { store, sender, deps } = harness();
+    store.seedRun({ concurrencyGroup: GROUP, cancelRequested: true });
+    store.groups.set(GROUP, { running: RUN_ID });
+    // Every conditional write loses: simulate perpetual contention.
+    store.clearRunning = async () => false;
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(sender.successes.at(-1)?.output).toEqual({
+      outcome: 'terminal',
+      runStatus: 'CANCELLED',
+    });
   });
 });

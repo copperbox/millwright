@@ -4,7 +4,7 @@ import { SFNClient } from '@aws-sdk/client-sfn';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DEFAULT_METADATA_RETENTION_DAYS } from '@copperbox/millwright-state';
 import { S3PrefixCopier } from './copier';
-import { SfnExecutionStarter } from './executions';
+import { SfnExecutionStarter } from '../shared/executions';
 import { BusEventEnvelope, LauncherDeps, processBusEvent } from './launcher';
 import { DynamoLauncherStore } from './store';
 

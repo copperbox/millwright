@@ -1,7 +1,7 @@
 import type { SFNClient } from '@aws-sdk/client-sfn';
 import { RunItem, runKey, withMetadataTtl } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
-import { SfnExecutionStarter, executionName } from '../src/runtime/launcher/executions';
+import { SfnExecutionStarter, executionName } from '../src/runtime/shared/executions';
 
 const NOW = Date.parse('2026-08-12T06:00:00Z');
 

@@ -96,6 +96,10 @@ export class RunExecutor extends Construct {
         DEPLOYMENT_NAME: name,
         EVENT_BUS_NAME: props.eventBusName,
         METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),
+        // Group hand-off target: the decider starts a pending run's execution
+        // on this same machine (spec §8.4). Spelled from the pinned name — the
+        // machine's own attribute would be a self-reference.
+        RUN_EXECUTOR_ARN: this.stateMachineArn,
       },
       bundling: {
         format: OutputFormat.CJS,
@@ -118,6 +122,14 @@ export class RunExecutor extends Construct {
     this.deciderFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['states:SendTaskSuccess', 'states:SendTaskFailure'],
+        resources: [this.stateMachineArn],
+      }),
+    );
+    // Concurrency-group hand-off (spec §8.4): on run completion the decider
+    // starts the group's pending run on this same machine.
+    this.deciderFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['states:StartExecution'],
         resources: [this.stateMachineArn],
       }),
     );

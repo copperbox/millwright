@@ -54,6 +54,12 @@ describe('run executor wiring (C5–C7)', () => {
           BUILD_PROJECT_NAME: 'ci-builds',
           DEPLOYMENT_NAME: 'ci',
           METADATA_RETENTION_DAYS: '90',
+          // Group hand-off target (spec §8.4), spelled from the pinned name.
+          RUN_EXECUTOR_ARN: Match.objectLike({
+            'Fn::Join': Match.arrayWith([
+              Match.arrayWith([Match.stringLikeRegexp(':stateMachine:ci-run-executor')]),
+            ]),
+          }),
         }),
       },
     });
@@ -70,6 +76,15 @@ describe('run executor wiring (C5–C7)', () => {
           }),
           Match.objectLike({
             Action: ['states:SendTaskSuccess', 'states:SendTaskFailure'],
+          }),
+          // Concurrency-group hand-off: start the pending run on completion.
+          Match.objectLike({
+            Action: 'states:StartExecution',
+            Resource: Match.objectLike({
+              'Fn::Join': Match.arrayWith([
+                Match.arrayWith([Match.stringLikeRegexp(':stateMachine:ci-run-executor')]),
+              ]),
+            }),
           }),
         ]),
       },

@@ -16,6 +16,7 @@ import {
   parseRunId,
   workflowFromModel,
 } from '@copperbox/millwright-state';
+import { GroupSlotStore, PendingRunStarter, releaseGroupSlot } from '../shared/groups';
 import { JobProjectionPatch } from '../shared/jobs';
 
 /**
@@ -65,7 +66,7 @@ export interface DispatchContext {
   readonly serviceRoleArn?: string;
 }
 
-export interface DeciderStore {
+export interface DeciderStore extends GroupSlotStore {
   getRun(coords: RunCoordinates): Promise<RunItem | undefined>;
   /**
    * Write the iteration's task token; on `markStarted`, also stamp
@@ -144,6 +145,8 @@ export interface DeciderDeps {
   readonly runner: BuildRunner;
   readonly models: ModelSource;
   readonly sender: TokenSender;
+  /** Starts a group's pending run on hand-off (`states:StartExecution`). */
+  readonly starter: PendingRunStarter;
   /** Iterations per execution before carrying over to a fresh one. */
   readonly iterationBudget: number;
   readonly log: (message: string, fields?: Record<string, unknown>) => void;
@@ -215,6 +218,9 @@ export async function runDeciderIteration(
     return 'failed';
   }
   if (TERMINAL_RUN_STATUSES.includes(run.status)) {
+    // A hand-off can start a run that was cancelled while QUEUED: this wake
+    // is its only iteration, so it must release the slot it was handed.
+    await releaseGroup(deps, run, nowMs);
     await sender.success(input.taskToken, terminal(run.status));
     return 'terminal';
   }
@@ -225,6 +231,7 @@ export async function runDeciderIteration(
   const markStarted = !run.startedAt;
   if ((await store.beginIteration(coords, input.taskToken, { markStarted }, nowMs)) === 'terminal') {
     const finished = await store.getRun(coords);
+    await releaseGroup(deps, finished, nowMs);
     await sender.success(input.taskToken, terminal(finished?.status ?? 'FAILED'));
     return 'terminal';
   }
@@ -359,6 +366,7 @@ export async function runDeciderIteration(
 
   if (actions.runStatus !== 'RUNNING') {
     await store.finishRun(coords, actions.runStatus, nowMs);
+    await releaseGroup(deps, run, nowMs);
     await sender.success(input.taskToken, terminal(actions.runStatus));
     log('run finished', { runId: formatRunId(coords), status: actions.runStatus });
     return 'terminal';
@@ -393,4 +401,37 @@ export async function runDeciderIteration(
 
 function terminal(runStatus: RunItem['status']): DeciderOutput {
   return { outcome: 'terminal', runStatus };
+}
+
+/**
+ * Release the finished run's concurrency-group slot and start the pending
+ * run (spec §8.4). Never fails the completion: a hand-off left incomplete
+ * here — crash, contention, transient error — is re-converged by the sweep
+ * within a minute.
+ */
+async function releaseGroup(
+  deps: DeciderDeps,
+  run: RunItem | undefined,
+  nowMs: number,
+): Promise<void> {
+  if (!run?.concurrencyGroup) {
+    return;
+  }
+  const runId = formatRunId(run);
+  try {
+    const outcome = await releaseGroupSlot(deps, run.concurrencyGroup, runId, nowMs);
+    if (outcome !== 'not-held') {
+      deps.log('released concurrency-group slot', {
+        group: run.concurrencyGroup,
+        runId,
+        outcome,
+      });
+    }
+  } catch (err) {
+    deps.log('group release failed; the sweep will repair', {
+      group: run.concurrencyGroup,
+      runId,
+      error: (err as Error).message,
+    });
+  }
 }

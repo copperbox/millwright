@@ -449,6 +449,24 @@ describe('concurrency gating', () => {
     expect(starter.startedRuns).toEqual(['octocat/app#deploy#1']);
   });
 
+  it('stamps the evaluated group key on every gated run record', async () => {
+    const { deps, store } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', GATED);
+    await processBusEvent(deps, pushEvent(), NOW);
+    await processBusEvent(deps, pushEvent({ sha: 'd'.repeat(40) }), NOW + 1000);
+    // Started and queued alike carry the key the decider/sweep release on.
+    for (const runNumber of [1, 2]) {
+      const run = await store.getRun({ repo: 'octocat/app', workflow: 'deploy', runNumber });
+      expect(run?.concurrencyGroup).toBe('deploy-main');
+    }
+    // No group declared → no key stamped (unlimited concurrency).
+    const plain = harness();
+    plain.store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    await processBusEvent(plain.deps, pushEvent(), NOW);
+    const run = await plain.store.getRun({ repo: 'octocat/app', workflow: 'ci', runNumber: 1 });
+    expect(run?.concurrencyGroup).toBeUndefined();
+  });
+
   it('queues behind an occupied group and replaces the pending waiter (slot of one)', async () => {
     const { deps, store, starter } = harness();
     store.putRegistry('octocat/app', 'refs/heads/main', GATED);
