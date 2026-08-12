@@ -16,3 +16,10 @@ model to stdout (or `--out <file>`).
 AWS credentials (profile / SSO / env) are the only auth. The CLI lists
 `/millwright/*` in SSM and auto-picks the deployment when the account+region
 has exactly one; otherwise set `MILLWRIGHT_DEPLOYMENT` or pass `--deployment`.
+
+The package's dist also ships `synth-job.bundle.js` (built by
+`npm run bundle-synth-job`): the cloud synth job's entry point, which the
+`Millwright` construct stages as an S3 asset and runs inside the CodeBuild
+synth build — clone via deploy key, lockfile-discovered install, in-process
+synth, `model.json` + `source.tar.gz` upload. It is the control plane's own
+tooling; watched repos never install it.

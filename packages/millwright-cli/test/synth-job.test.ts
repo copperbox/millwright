@@ -211,6 +211,16 @@ describe('runSynthJob', () => {
     }
   });
 
+  it('normalizes a deploy key stored without a trailing newline — OpenSSH refuses one otherwise', async () => {
+    const h = harness({
+      env: { ...ENV, MILLWRIGHT_DEPLOY_KEY: ENV.MILLWRIGHT_DEPLOY_KEY.trimEnd() },
+      checkoutFiles: { 'package.json': '{}', 'package-lock.json': '{}' },
+    });
+    await runSynthJob(h.deps);
+    const written = fs.readFileSync(path.join(workdir, 'deploy-key'), 'utf8');
+    expect(written.endsWith('\n')).toBe(true);
+  });
+
   it('fetches the PR head from the base repo namespace for PR runs — one extra fetch, no fork remote', async () => {
     const h = harness({
       env: { ...ENV, MILLWRIGHT_REF: 'refs/pull/17/head' },

@@ -88,7 +88,10 @@ export async function runSynthJob(deps: SynthJobDeps): Promise<number> {
 async function checkout(deps: SynthJobDeps, config: SynthJobConfig): Promise<string> {
   const keyFile = path.join(deps.workdir, 'deploy-key');
   const knownHosts = path.join(deps.workdir, 'known_hosts');
-  fs.writeFileSync(keyFile, config.deployKey, { mode: 0o600 });
+  // OpenSSH refuses a private key file without a trailing newline; be
+  // forgiving about how the parameter was stored.
+  const keyMaterial = config.deployKey.endsWith('\n') ? config.deployKey : `${config.deployKey}\n`;
+  fs.writeFileSync(keyFile, keyMaterial, { mode: 0o600 });
   fs.writeFileSync(knownHosts, config.hostKeys);
 
   const sourceDir = path.join(deps.workdir, 'src');
