@@ -30,8 +30,12 @@ export function parseGithubAppParameter(value: string | undefined): GithubAppCon
     return undefined;
   }
   const { appId, privateKey } = parsed as { appId?: unknown; privateKey?: unknown };
-  const id =
-    typeof appId === 'string' && appId ? appId : typeof appId === 'number' ? String(appId) : undefined;
+  let id: string | undefined;
+  if (typeof appId === 'string' && appId) {
+    id = appId;
+  } else if (typeof appId === 'number') {
+    id = String(appId);
+  }
   return id && typeof privateKey === 'string' && privateKey ? { appId: id, privateKey } : undefined;
 }
 

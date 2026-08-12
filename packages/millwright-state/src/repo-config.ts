@@ -28,7 +28,13 @@ function toggle(value: unknown, fallback: boolean): boolean {
   if (typeof value === 'boolean') {
     return value;
   }
-  return value === 'on' ? true : value === 'off' ? false : fallback;
+  if (value === 'on') {
+    return true;
+  }
+  if (value === 'off') {
+    return false;
+  }
+  return fallback;
 }
 
 export function parseRepoPollingConfig(json: string | undefined): RepoPollingConfig {
