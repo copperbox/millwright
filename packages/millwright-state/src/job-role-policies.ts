@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { JobRoleIdentity } from './job-roles';
-import { KeyFormatError } from './keys';
+import { JobRoleIdentity, assertRepoSlug } from './job-roles';
 import { CACHE_PREFIX, RUNS_PREFIX } from './s3-layout';
 
 /**
@@ -100,9 +99,7 @@ export function noSecretPolicyDocument(
   identity: JobRoleIdentity,
   context: JobRolePolicyContext,
 ): PolicyDocument {
-  if (!identity.repo || !/^[^/]+\/[^/]+$/.test(identity.repo)) {
-    throw new KeyFormatError(`repo must be "owner/name", got "${identity.repo}"`);
-  }
+  assertRepoSlug(identity.repo);
   const partition = context.partition ?? 'aws';
   const bucket = bucketArn(partition, context.artifactBucketName);
   const workflowPrefix = `${RUNS_PREFIX}${identity.repo}/${identity.workflow}/*`;
@@ -249,7 +246,12 @@ function canonicalize(value: unknown): unknown {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .sort(([a], [b]) => {
+          if (a === b) {
+            return 0;
+          }
+          return a < b ? -1 : 1;
+        })
         .map(([key, entry]) => [key, canonicalize(entry)]),
     );
   }

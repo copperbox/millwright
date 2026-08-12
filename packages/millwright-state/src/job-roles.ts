@@ -58,15 +58,20 @@ const VARIANT_SUFFIXES: Record<JobRoleVariant, string> = {
   'no-secret': 'ns',
 };
 
+/** Watched repos are always `owner/name`; anything else would corrupt key and ARN layouts. */
+export function assertRepoSlug(repo: string): void {
+  if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
+    throw new KeyFormatError(`repo must be "owner/name", got "${repo}"`);
+  }
+}
+
 function assertIdentity(identity: JobRoleIdentity): void {
   if (!identity.deploymentName || identity.deploymentName.includes('/')) {
     throw new KeyFormatError(
       `deploymentName must be non-empty and free of "/", got "${identity.deploymentName}"`,
     );
   }
-  if (!identity.repo || !/^[^/]+\/[^/]+$/.test(identity.repo)) {
-    throw new KeyFormatError(`repo must be "owner/name", got "${identity.repo}"`);
-  }
+  assertRepoSlug(identity.repo);
   for (const [label, value] of [
     ['workflow', identity.workflow],
     ['job', identity.job],
