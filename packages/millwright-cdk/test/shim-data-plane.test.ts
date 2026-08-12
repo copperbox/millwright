@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DataPlaneDeps,
-  ParsedDataPlane,
   parseDataPlaneCli,
   runDataPlane,
 } from '../src/runtime/shim/data-plane';
@@ -60,7 +59,7 @@ async function run(deps: DataPlaneDeps, argv: string[]): Promise<number> {
   if (parsed.kind === 'error') {
     throw new Error(`unexpected parse error: ${parsed.message}`);
   }
-  return runDataPlane(parsed as Exclude<ParsedDataPlane, { kind: 'error' }>, deps);
+  return runDataPlane(parsed, deps);
 }
 
 function write(workdir: string, rel: string, content: string, mode?: number): void {

@@ -224,6 +224,9 @@ function gnuLongNameBlocks(path: string): Buffer[] {
   return [header, padded];
 }
 
+/** ustar typeflag bytes: '0' file, '5' dir, '2' symlink. */
+const TYPE_BYTES: Record<TarEntry['type'], number> = { file: 0x30, dir: 0x35, symlink: 0x32 };
+
 /** Build a gzipped ustar archive from entries, deterministically. */
 export function packTarGz(entries: readonly TarEntry[]): Buffer {
   const blocks: Buffer[] = [];
@@ -233,7 +236,7 @@ export function packTarGz(entries: readonly TarEntry[]): Buffer {
       blocks.push(...gnuLongNameBlocks(nameField));
     }
     const size = entry.type === 'file' ? entry.content.length : 0;
-    const typeByte = entry.type === 'file' ? 0x30 : entry.type === 'dir' ? 0x35 : 0x32;
+    const typeByte = TYPE_BYTES[entry.type];
     blocks.push(headerFor(entry, nameField.slice(0, 100), size, typeByte));
     if (size > 0) {
       const padded = Buffer.alloc(Math.ceil(size / BLOCK) * BLOCK);

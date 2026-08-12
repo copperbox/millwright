@@ -16,7 +16,7 @@ lockstep with a single version:
 | [`@copperbox/millwright-workflows`](packages/millwright-workflows) | Workflow definition library. Zero dependencies — never pulls in `aws-cdk-lib`. | The only install in watched repos. |
 | [`@copperbox/millwright-cdk`](packages/millwright-cdk) | The `Millwright` construct that deploys the control plane. | The operator's CDK app. |
 | [`@copperbox/millwright-cli`](packages/millwright-cli) | `millwright` binary (npx-able). | Operator + developer machines. |
-| [`@copperbox/millwright-state`](packages/millwright-state) | Shared data-plane helpers: state/polling table keys, SSM config-plane paths, S3 layout. | A dependency of the CDK and CLI packages, not installed directly. |
+| [`@copperbox/millwright-state`](packages/millwright-state) | Shared control- and data-plane contracts: state/polling table keys, SSM config-plane paths, S3 layout, the buildspec renderer, the `secretsAllowedRefs` gate. | A dependency of the CDK and CLI packages, not installed directly. |
 
 ## Developing
 

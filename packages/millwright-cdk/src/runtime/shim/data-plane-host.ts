@@ -24,7 +24,7 @@ function storeForUri(uri: string, s3: () => S3Client): ObjectStore {
     return new S3ObjectStore(
       s3(),
       { GetObjectCommand, PutObjectCommand, ListObjectsV2Command },
-      parsed.bucket!,
+      parsed.bucket,
       parsed.prefix,
     );
   }

@@ -176,12 +176,13 @@ export class S3ObjectStore implements ObjectStore {
   }
 }
 
-export interface ParsedDataPlaneUri {
-  readonly kind: 's3' | 'file';
-  /** Bucket for s3, absolute-or-relative root path for file. */
-  readonly bucket?: string;
-  readonly prefix: string;
-}
+export type ParsedDataPlaneUri =
+  | { readonly kind: 's3'; readonly bucket: string; readonly prefix: string }
+  | {
+      /** Anything that is not an `s3://` URI is a local directory path. */
+      readonly kind: 'file';
+      readonly prefix: string;
+    };
 
 /** `s3://bucket/prefix` → s3; anything else is a local directory path. */
 export function parseDataPlaneUri(uri: string): ParsedDataPlaneUri {
