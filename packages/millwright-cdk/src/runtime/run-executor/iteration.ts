@@ -11,6 +11,7 @@ import {
   RunModelWorkflow,
   decide,
   formatRunId,
+  jobKey,
   parseRunId,
   workflowFromModel,
 } from '@copperbox/millwright-state';
@@ -71,6 +72,17 @@ export interface DeciderStore {
     nowMs: number,
   ): Promise<'ok' | 'terminal'>;
   listJobs(coords: RunCoordinates): Promise<readonly JobItem[]>;
+  /**
+   * Seed a reused job's row terminal SUCCEEDED with `reusedFrom` (spec §7.7,
+   * `rerun --failed`). Conditional on the row not existing — a no-op when a
+   * concurrent iteration seeded first.
+   */
+  seedReusedJob(
+    coords: RunCoordinates,
+    job: string,
+    reusedFrom: string,
+    nowMs: number,
+  ): Promise<void>;
   /**
    * Claim a dispatch: attempts := expected + 1, conditioned on the row still
    * showing exactly `expected` attempts, so concurrent iterations can never
@@ -224,6 +236,28 @@ export async function runDeciderIteration(
 
   const rows = await store.listJobs(coords);
   const rowByName = new Map(rows.map((row) => [row.job, row]));
+
+  // Rerun --failed (spec §7.7): the launcher prefix-copied these jobs'
+  // outputs; the decider seeds them terminal SUCCEEDED with reusedFrom so
+  // dependents dispatch without a build. First iteration only — once a row
+  // exists it is never reseeded.
+  if (run.rerunOf) {
+    for (const jobName of run.reuseJobs ?? []) {
+      if (rowByName.has(jobName)) {
+        continue;
+      }
+      await store.seedReusedJob(coords, jobName, run.rerunOf, nowMs);
+      rowByName.set(jobName, {
+        ...jobKey(coords, jobName),
+        ...coords,
+        job: jobName,
+        status: 'SUCCEEDED',
+        reusedFrom: run.rerunOf,
+        finishedAt: nowIso,
+        expiresAt: 0,
+      });
+    }
+  }
   const buildIds = rows.flatMap((row) => (row.buildId ? [row.buildId] : []));
   const snapshots = await runner.getStatuses(buildIds);
 

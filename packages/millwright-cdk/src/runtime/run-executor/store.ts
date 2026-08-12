@@ -9,7 +9,7 @@ import {
   runKey,
 } from '@copperbox/millwright-state';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { GetCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   JobProjectionPatch,
   isConditionalCheckFailure,
@@ -79,6 +79,40 @@ export class DynamoDeciderStore implements DeciderStore {
 
   async listJobs(coords: RunCoordinates): Promise<readonly JobItem[]> {
     return queryJobRows(this.client, this.tableName, coords);
+  }
+
+  async seedReusedJob(
+    coords: RunCoordinates,
+    job: string,
+    reusedFrom: string,
+    nowMs: number,
+  ): Promise<void> {
+    const item: JobItem = {
+      ...jobKey(coords, job),
+      repo: coords.repo,
+      workflow: coords.workflow,
+      runNumber: coords.runNumber,
+      job,
+      status: 'SUCCEEDED',
+      reusedFrom,
+      finishedAt: new Date(nowMs).toISOString(),
+      expiresAt: expiresAtAfterDays(nowMs, this.metadataRetentionDays),
+    };
+    try {
+      await this.client.send(
+        new PutCommand({
+          TableName: this.tableName,
+          Item: item,
+          // Seed exactly once: an existing row — another iteration's seed or
+          // real dispatch state — is never overwritten.
+          ConditionExpression: 'attribute_not_exists(pk)',
+        }),
+      );
+    } catch (err) {
+      if (!isConditionalCheckFailure(err)) {
+        throw err;
+      }
+    }
   }
 
   async claimDispatch(

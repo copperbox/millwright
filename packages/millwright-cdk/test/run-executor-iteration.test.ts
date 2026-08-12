@@ -147,6 +147,27 @@ class MemoryStore implements DeciderStore {
     });
   }
 
+  async seedReusedJob(
+    coords: RunCoordinates,
+    job: string,
+    reusedFrom: string,
+    nowMs: number,
+  ): Promise<void> {
+    const key = jobKey(coords, job);
+    if (this.jobs.has(key.pk + key.sk)) {
+      return;
+    }
+    this.jobs.set(key.pk + key.sk, {
+      ...key,
+      ...COORDS,
+      job,
+      status: 'SUCCEEDED',
+      reusedFrom,
+      finishedAt: new Date(nowMs).toISOString(),
+      expiresAt: 0,
+    });
+  }
+
   async writeJobProjection(
     coords: RunCoordinates,
     job: string,
@@ -419,6 +440,49 @@ describe('decider iteration — reconciliation and races', () => {
     store.seedRun();
     expect(await iterate(deps, 0, NOW)).toBe('failed');
     expect(sender.failures[0]).toMatchObject({ error: 'ModelUnavailable' });
+  });
+});
+
+describe('decider iteration — rerun seeding (spec §7.7)', () => {
+  it('seeds reused jobs terminal SUCCEEDED with reusedFrom; dependents dispatch at once', async () => {
+    const { store, runner, deps } = harness();
+    store.seedRun({ trigger: 'rerun', rerunOf: 'octo/app#ci#6', reuseJobs: ['build'] });
+
+    expect(await iterate(deps, 0, NOW)).toBe('parked');
+    expect(store.job('build')).toMatchObject({
+      status: 'SUCCEEDED',
+      reusedFrom: 'octo/app#ci#6',
+    });
+    expect(store.job('build')?.buildId).toBeUndefined();
+    // The reused success satisfies its dependents without a build.
+    expect(runner.started.map((s) => s.job)).toEqual(['test']);
+  });
+
+  it('never reseeds over an existing row on re-entry', async () => {
+    const { store, runner, deps } = harness();
+    store.seedRun({ trigger: 'rerun', rerunOf: 'octo/app#ci#6', reuseJobs: ['build'] });
+    await iterate(deps, 0, NOW);
+
+    // The dispatched dependent fails; a later entry must not resurrect it
+    // or touch the seeded row.
+    runner.finish('mw-builds:1', 'FAILED');
+    expect(await iterate(deps, 1, NOW + 60_000)).toBe('terminal');
+    expect(store.job('build')).toMatchObject({ status: 'SUCCEEDED', reusedFrom: 'octo/app#ci#6' });
+    expect(store.job('test')).toMatchObject({ status: 'FAILED' });
+    expect(store.run().status).toBe('FAILED');
+  });
+
+  it('completes immediately when every job is reused', async () => {
+    const { store, runner, sender, deps } = harness();
+    store.seedRun({ trigger: 'rerun', rerunOf: 'octo/app#ci#6', reuseJobs: ['build', 'test'] });
+
+    expect(await iterate(deps, 0, NOW)).toBe('terminal');
+    expect(runner.started).toEqual([]);
+    expect(store.run().status).toBe('SUCCEEDED');
+    expect(sender.successes.at(-1)?.output).toEqual({
+      outcome: 'terminal',
+      runStatus: 'SUCCEEDED',
+    });
   });
 });
 
