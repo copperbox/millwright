@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Emit resolves workspace deps via their built dist (root build script
+    // runs in dependency order); the base paths mapping to src would drag
+    // out-of-rootDir sources into the program.
+    "paths": {}
+  },
+  "include": ["src"]
+}
