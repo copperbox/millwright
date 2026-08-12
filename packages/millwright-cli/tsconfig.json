@@ -1,7 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    // Typecheck against the workspace sibling's sources so a clean checkout
+    // needs no build; the published package resolves normally via dist.
+    "paths": {
+      "@copperbox/millwright-workflows": ["../millwright-workflows/src/index.ts"]
+    }
   },
   "include": ["src", "test"]
 }
