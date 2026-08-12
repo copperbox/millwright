@@ -35,6 +35,7 @@ export {
   registryKey,
   runCounterKey,
   runKey,
+  runPartitionKey,
   stepKey,
   stepSortKeyPrefix,
 } from './keys';
@@ -72,6 +73,36 @@ export {
   StepStatus,
 } from './items';
 export {
+  BuildOutcome,
+  DeciderActions,
+  DeciderClock,
+  DeciderJobState,
+  EffectiveJobStatus,
+  JobMark,
+  STALE_DISPATCH_MS,
+  decide,
+  effectiveJobStatus,
+} from './decider';
+export {
+  DEFAULT_JOB_ATTEMPTS,
+  DEFAULT_RUN_DEADLINE_MINUTES,
+  MAX_RUN_DEADLINE_MINUTES,
+  RunModel,
+  RunModelArtifact,
+  RunModelCache,
+  RunModelCompute,
+  RunModelError,
+  RunModelJob,
+  RunModelSecret,
+  RunModelStep,
+  RunModelWorkflow,
+  jobAttemptCap,
+  jobDependencies,
+  parseRunModel,
+  runDeadlineMinutes,
+  workflowFromModel,
+} from './run-model';
+export {
   JOB_ROLE_INLINE_POLICY_NAME,
   JOB_ROLE_NAME_MAX_LENGTH,
   JOB_ROLE_NAME_PREFIX,
@@ -102,6 +133,7 @@ export {
   selectJobRoleVariant,
 } from './secrets-refs';
 export {
+  BUILD_MAPPING_TTL_SECONDS,
   DEFAULT_METADATA_RETENTION_DAYS,
   EVENT_DEDUPE_TTL_SECONDS,
   TTL_ATTRIBUTE,
@@ -140,9 +172,36 @@ export {
   secretParameterName,
 } from './ssm-paths';
 export {
+  RoleVariant,
+  gateJobSecrets,
+  matchesAnyRefPattern,
+  matchesRefPattern,
+  secretsAllowedRefsFromConfig,
+  selectRoleVariant,
+} from './secrets-gate';
+export {
+  BuildspecContext,
+  CACHE_URI_ENV,
+  OUT_URI_ENV,
+  RESERVED_ENV_PREFIXES,
+  RenderedBuildspec,
+  SHIM_BINARY_NAME,
+  SHIM_DIR_ENV,
+  SHIM_SOURCE_IDENTIFIER,
+  buildspecForJob,
+  dataPlaneEnvironment,
+  isReservedEnvName,
+  renderJobBuildspec,
+  runInputSourceLocation,
+  shellQuote,
+  shimSourceLocation,
+} from './buildspec';
+export {
   CACHE_PREFIX,
+  CONTROL_PREFIX,
   MODEL_OBJECT_NAME,
   RUNS_PREFIX,
+  SHIM_PREFIX,
   SOURCE_OBJECT_NAME,
   artifactPrefix,
   cacheObjectKey,

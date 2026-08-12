@@ -21,3 +21,19 @@ parseRunKey(key); // { repo: 'copperbox/millwright', workflow: 'ci', runNumber: 
 
 The state table is never a credential store, and `REG#` registry rows are
 exempt from the metadata TTL — `withMetadataTtl` enforces the exemption.
+
+## The `secretsAllowedRefs` gate (spec §12a)
+
+`selectRoleVariant(ref, secretsAllowedRefs)` is the enforcement point's
+library half: the decider calls it at dispatch to pick the job's stable role
+variant (spec §10.2), and `gateJobSecrets` strips secret references from
+no-secret dispatches before the buildspec renders. Unset (or malformed —
+`secretsAllowedRefsFromConfig` narrows fail-closed) means **no ref receives
+secrets**, and `refs/pull/N` identities never match the anchored short-name
+patterns. Synth-time checking of the same dialect is fail-fast UX in the
+workflows package, never enforcement — synth executes repo code.
+
+An allowlisted ref name is only as strong as the GitHub-side protection of
+that namespace: `release/*` hands secrets to anyone who can push
+`release/anything` unless a ruleset protects it. That warning belongs
+wherever `secretsAllowedRefs` is documented — keep it loud.

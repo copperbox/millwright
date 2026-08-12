@@ -84,6 +84,10 @@ export interface JobItem extends ExpiringItem {
   readonly runNumber: number;
   readonly job: string;
   readonly status: JobStatus;
+  /** Total StartBuild attempts consumed (dispatch claims; spec §7.3 cap). */
+  readonly attempts?: number;
+  /** ISO timestamp of the latest dispatch claim. */
+  readonly dispatchedAt?: string;
   readonly buildId?: string;
   readonly buildArn?: string;
   readonly logStreamName?: string;

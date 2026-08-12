@@ -13,6 +13,13 @@ export const DEFAULT_METADATA_RETENTION_DAYS = 90;
 /** Event dedupe / processing records expire after 30 minutes (spec §7.1). */
 export const EVENT_DEDUPE_TTL_SECONDS = 30 * 60;
 
+/**
+ * `BUILD#` mapping items carry no TTL at creation; the build-events handler
+ * stamps this horizon once the build is terminal (spec §9.1: "short TTL past
+ * terminality"), long enough for any straggling event or reconcile pass.
+ */
+export const BUILD_MAPPING_TTL_SECONDS = 24 * 60 * 60;
+
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
 /** Epoch-seconds TTL value for an item written at `nowMs`, kept `days` days. */
