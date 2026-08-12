@@ -1,4 +1,4 @@
-import type { StartBuildCommandInput } from '@aws-sdk/client-codebuild';
+import type { CodeBuildClient, StartBuildCommandInput } from '@aws-sdk/client-codebuild';
 import { RunModelJob, renderJobBuildspec } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
 import { CodeBuildRunner, toBuildOutcome } from '../src/runtime/run-executor/codebuild';
@@ -17,17 +17,21 @@ const JOB: RunModelJob = {
   steps: [{ run: 'make' }],
 };
 
-/** Captures StartBuild inputs and answers with a fixed build. */
-function stubRunner(): { runner: CodeBuildRunner; started: StartBuildCommandInput[] } {
+/** Captures StartBuild inputs and answers with the given result. */
+function stubRunner(
+  response: unknown = {
+    build: { id: 'ci-builds:1234', arn: 'arn:aws:codebuild:build/ci-builds:1234' },
+  },
+): { runner: CodeBuildRunner; started: StartBuildCommandInput[] } {
   const started: StartBuildCommandInput[] = [];
   const client = {
     send: async (command: { input: StartBuildCommandInput }) => {
       started.push(command.input);
-      return { build: { id: 'ci-builds:1234', arn: 'arn:aws:codebuild:build/ci-builds:1234' } };
+      return response;
     },
-  };
+  } as unknown as CodeBuildClient;
   return {
-    runner: new CodeBuildRunner(client as any, {
+    runner: new CodeBuildRunner(client, {
       projectName: 'ci-builds',
       bucketName: 'bkt',
       deploymentName: 'ci',
@@ -112,12 +116,7 @@ describe('per-job dispatch overrides (spec §7.4)', () => {
   });
 
   it('refuses a StartBuild answer without a build id', async () => {
-    const client = { send: async () => ({}) };
-    const runner = new CodeBuildRunner(client as any, {
-      projectName: 'ci-builds',
-      bucketName: 'bkt',
-      deploymentName: 'ci',
-    });
+    const { runner } = stubRunner({});
     await expect(runner.start(JOB, CTX)).rejects.toThrow(/no build id/);
   });
 });
