@@ -95,6 +95,11 @@ export {
   refMapKey,
 } from './polling';
 export {
+  DEFAULT_REPO_POLLING_CONFIG,
+  RepoPollingConfig,
+  parseRepoPollingConfig,
+} from './repo-config';
+export {
   configPlaneRoot,
   deployKeyParameterName,
   deploymentNameFromManifestParameter,
