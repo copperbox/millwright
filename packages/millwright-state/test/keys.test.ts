@@ -8,6 +8,7 @@ import {
   checkStateKey,
   concurrencyGroupKey,
   eventDedupeKey,
+  formatRunId,
   invertedRunNumber,
   jobKey,
   parseBuildMappingKey,
@@ -18,6 +19,7 @@ import {
   parseJobKey,
   parseRegistryKey,
   parseRunCounterKey,
+  parseRunId,
   parseRunKey,
   parseStepKey,
   registryKey,
@@ -147,6 +149,42 @@ describe('event dedupe key', () => {
     expect(() =>
       parseEventDedupeKey({ pk: 'EVENT#r/r#main#deadbeef#poke', sk: '-' }),
     ).toThrow(KeyFormatError);
+  });
+
+  it('round-trips a cron identity with its minute qualifier', () => {
+    const cron: EventIdentity = {
+      ...event,
+      kind: 'cron',
+      qualifier: '2026-08-12T06:03',
+    };
+    const key = eventDedupeKey(cron);
+    expect(key.pk).toBe(`EVENT#copperbox/millwright#main#${SHA}#cron#2026-08-12T06:03`);
+    expect(parseEventDedupeKey(key)).toEqual(cron);
+  });
+
+  it('distinguishes qualified identities from unqualified ones', () => {
+    const a = eventDedupeKey({ ...event, kind: 'cron', qualifier: '2026-08-12T06:03' });
+    const b = eventDedupeKey({ ...event, kind: 'cron', qualifier: '2026-08-12T06:04' });
+    const c = eventDedupeKey({ ...event, kind: 'cron' });
+    expect(new Set([a.pk, b.pk, c.pk]).size).toBe(3);
+  });
+
+  it('rejects a qualifier containing "#"', () => {
+    expect(() => eventDedupeKey({ ...event, qualifier: 'a#b' })).toThrow(KeyFormatError);
+  });
+});
+
+describe('run id', () => {
+  it('round-trips', () => {
+    const coords = { repo: REPO, workflow: 'ci', runNumber: 142 };
+    expect(formatRunId(coords)).toBe('copperbox/millwright#ci#142');
+    expect(parseRunId('copperbox/millwright#ci#142')).toEqual(coords);
+  });
+
+  it('rejects malformed ids', () => {
+    for (const bad of ['', 'ci#142', 'a#b#c#1', 'repo#wf#zero', 'repo#wf#0']) {
+      expect(() => parseRunId(bad)).toThrow(KeyFormatError);
+    }
   });
 });
 

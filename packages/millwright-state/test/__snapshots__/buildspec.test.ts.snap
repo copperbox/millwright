@@ -1,0 +1,64 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderJobBuildspec > renders a minimal job (snapshot) 1`] = `
+"{
+  "version": "0.2",
+  "env": {
+    "shell": "/bin/sh"
+  },
+  "phases": {
+    "pre_build": {
+      "commands": [
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" source unpack --archive source.tar.gz"
+      ]
+    },
+    "build": {
+      "commands": [
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 0 -- 'make'"
+      ]
+    }
+  }
+}"
+`;
+
+exports[`renderJobBuildspec > renders the full acceptance-criteria job (snapshot) 1`] = `
+"{
+  "version": "0.2",
+  "env": {
+    "shell": "/bin/sh",
+    "parameter-store": {
+      "NPM_TOKEN": "/millwright/ci/secrets/octo/app/npm-token",
+      "SHARED": "/millwright/ci/secrets/platform/db-url"
+    },
+    "secrets-manager": {
+      "DOCKERHUB": "arn:aws:secretsmanager:us-east-1:1:secret:prod/dockerhub"
+    }
+  },
+  "phases": {
+    "install": {
+      "commands": [
+        "if ! docker info >/dev/null 2>&1; then dockerd >/tmp/millwright-dockerd.log 2>&1 & i=0; until docker info >/dev/null 2>&1; do i=$((i+1)); if [ \\"$i\\" -ge 60 ]; then echo \\"millwright: dockerd did not become ready\\" >&2; exit 1; fi; sleep 1; done; fi"
+      ]
+    },
+    "pre_build": {
+      "commands": [
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" source unpack --archive source.tar.gz",
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" artifact fetch --job 'build' --name 'dist'",
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" cache restore --key 'npm-abc123' --restore-key 'npm-' --path 'node_modules'"
+      ]
+    },
+    "build": {
+      "commands": [
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 0 -- 'npm ci && npm run build'",
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 1 --name 'publish' --skip-if 'npm view myapp@$MILLWRIGHT_SHA version' -- 'npm publish'"
+      ]
+    },
+    "post_build": {
+      "commands": [
+        "if [ \\"\${CODEBUILD_BUILD_SUCCEEDING:-1}\\" = \\"1\\" ]; then sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" artifact upload --name 'packed' --path 'out/pack'; fi",
+        "if [ \\"\${CODEBUILD_BUILD_SUCCEEDING:-1}\\" = \\"1\\" ]; then sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" cache save --key 'npm-abc123' --path 'node_modules'; fi"
+      ]
+    }
+  }
+}"
+`;

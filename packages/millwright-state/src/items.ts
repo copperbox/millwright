@@ -14,6 +14,9 @@ import { TriggerKind } from './keys';
 
 export type RunStatus = 'PENDING' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
+/** Run statuses with no further transitions — the only rerun-able sources. */
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
+
 export type JobStatus =
   | 'PENDING'
   | 'QUEUED'
@@ -24,6 +27,12 @@ export type JobStatus =
   | 'TIMED_OUT'
   | 'CANCELLED'
   | 'SKIPPED';
+
+/**
+ * Job statuses `rerun --failed` re-executes (spec §7.7). Their SKIPPED
+ * dependents rerun with them; SUCCEEDED jobs' outputs are reused instead.
+ */
+export const RERUNNABLE_JOB_STATUSES: readonly JobStatus[] = ['FAILED', 'TIMED_OUT', 'CANCELLED'];
 
 export type StepStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'SKIPPED';
 
@@ -65,8 +74,16 @@ export interface RunItem extends ExpiringItem {
   readonly cancelRequested?: boolean;
   /** Run id this run is a rerun of. */
   readonly rerunOf?: string;
+  /**
+   * `rerun --failed`: jobs whose succeeded outputs were prefix-copied from
+   * {@link rerunOf} — the decider seeds them terminal SUCCEEDED with
+   * `reusedFrom` instead of dispatching them.
+   */
+  readonly reuseJobs?: readonly string[];
   /** e.g. `superseded` on concurrency-policy cancellation. */
   readonly reason?: string;
+  /** Typed inputs carried by a `dispatch` trigger. */
+  readonly inputs?: Readonly<Record<string, string | boolean>>;
   /** Current Step Functions task token; rewritten every decider iteration. */
   readonly taskToken?: string;
 }
@@ -82,6 +99,10 @@ export interface JobItem extends ExpiringItem {
   readonly runNumber: number;
   readonly job: string;
   readonly status: JobStatus;
+  /** Total StartBuild attempts consumed (dispatch claims; spec §7.3 cap). */
+  readonly attempts?: number;
+  /** ISO timestamp of the latest dispatch claim. */
+  readonly dispatchedAt?: string;
   readonly buildId?: string;
   readonly buildArn?: string;
   readonly logStreamName?: string;
@@ -101,17 +122,23 @@ export interface StepItem extends ExpiringItem {
   readonly stepIndex: number;
   readonly status: StepStatus;
   readonly name?: string;
+  /** Present only on SKIPPED — a step only ever skips via its own `skipIf`. */
+  readonly reason?: Extract<SkipReason, 'skip_if'>;
   readonly startedAt?: string;
   readonly finishedAt?: string;
 }
 
 /**
- * `EVENT#<repo>#<ref>#<sha>#<kind>` / `-` — conditional-put dedupe record,
- * TTL 30 min. Doubles as the processing record: the run id is written on
- * creation so launcher retries resume idempotently.
+ * `EVENT#<repo>#<ref>#<sha>#<kind>[#<qualifier>]` / `-` — conditional-put
+ * dedupe record, TTL 30 min. A processing record, not a tombstone: each
+ * matched workflow's run id is written under `runIds` as its run is created,
+ * so a launcher crash-and-redeliver resumes idempotently instead of dropping
+ * the event. The launcher writes `runIds: {}` at claim time so later
+ * per-workflow SETs can target map paths unconditionally.
  */
 export interface EventDedupeItem extends ExpiringItem {
-  readonly runId?: string;
+  /** Workflow name → run id, written transactionally with each run's creation. */
+  readonly runIds?: Readonly<Record<string, string>>;
 }
 
 /** `BUILD#<build-id>` / `-` — run/job identity for the build-events handler. */
