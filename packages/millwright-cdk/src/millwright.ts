@@ -11,6 +11,7 @@ import { Boundary } from './boundary';
 import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
+import { Poller } from './poller';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -95,6 +96,8 @@ export class Millwright extends Construct {
   readonly eventBus: MillwrightEventBus;
   /** C4 — the launcher consuming trigger events from the bus. */
   readonly launcher: Launcher;
+  /** C2 — the tier-1 SSH ls-refs poller and its tick schedule. */
+  readonly poller: Poller;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -168,6 +171,14 @@ export class Millwright extends Construct {
       stateTable: this.stateTable,
       artifactBucket: this.artifactBucket,
       metadataRetention: this.metadataRetention,
+    });
+    this.poller = new Poller(this, 'Poller', {
+      deploymentName: this.deploymentName,
+      pollCadence: this.pollCadence,
+      pollingTable: this.pollingTable,
+      busName: this.eventBus.busName,
+      pollerRoleName: this.eventBus.pollerRoleName,
+      configKey: this.configKey,
     });
 
     // Self-registered deployment manifest: the CLI lists /millwright/*/manifest
