@@ -122,6 +122,8 @@ export interface StepItem extends ExpiringItem {
   readonly stepIndex: number;
   readonly status: StepStatus;
   readonly name?: string;
+  /** Present only on SKIPPED — a step only ever skips via its own `skipIf`. */
+  readonly reason?: Extract<SkipReason, 'skip_if'>;
   readonly startedAt?: string;
   readonly finishedAt?: string;
 }

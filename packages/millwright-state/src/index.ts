@@ -128,6 +128,17 @@ export {
   refMapKey,
 } from './polling';
 export {
+  EVENT_BUS_ENV,
+  STEP_EVENTS_FILE_ENV,
+  STEP_EVENT_DETAIL_TYPE,
+  StepEventDetail,
+  StepEventValidation,
+  StepSkipReason,
+  ValidStepEvent,
+  stepEventDetail,
+  validateStepEvent,
+} from './step-events';
+export {
   configPlaneRoot,
   deployKeyParameterName,
   deploymentNameFromManifestParameter,
