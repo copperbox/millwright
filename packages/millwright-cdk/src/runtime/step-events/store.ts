@@ -15,6 +15,10 @@ import { StepEventsStore } from './step-events';
  * wins — the shim emits one terminal event per step index, so the only
  * repeats are duplicate deliveries writing identical values.
  */
+/** Fields written only when the event carries them — absent optionals never
+ * reach the expression, so a terminal write never clears an earlier value. */
+const OPTIONAL_FIELDS = ['name', 'reason', 'startedAt', 'finishedAt'] as const;
+
 export class DynamoStepEventsStore implements StepEventsStore {
   constructor(
     private readonly client: DynamoDBDocumentClient,
@@ -41,9 +45,15 @@ export class DynamoStepEventsStore implements StepEventsStore {
       ':stepIndex': event.stepIndex,
       ':expiresAt': expiresAtAfterDays(nowMs, this.metadataRetentionDays),
     };
-    for (const field of ['name', 'reason', 'startedAt', 'finishedAt'] as const) {
+    const names: Record<string, string> = {
+      '#status': 'status',
+      '#job': 'job',
+      '#ttl': 'expiresAt',
+    };
+    for (const field of OPTIONAL_FIELDS) {
       if (event[field] !== undefined) {
         sets.push(`#${field} = :${field}`);
+        names[`#${field}`] = field;
         values[`:${field}`] = event[field];
       }
     }
@@ -56,16 +66,7 @@ export class DynamoStepEventsStore implements StepEventsStore {
           ...(event.status === 'RUNNING'
             ? { ConditionExpression: 'attribute_not_exists(pk) OR #status = :status' }
             : {}),
-          ExpressionAttributeNames: {
-            '#status': 'status',
-            '#job': 'job',
-            '#ttl': 'expiresAt',
-            ...Object.fromEntries(
-              ['name', 'reason', 'startedAt', 'finishedAt']
-                .filter((field) => event[field as keyof ValidStepEvent] !== undefined)
-                .map((field) => [`#${field}`, field]),
-            ),
-          },
+          ExpressionAttributeNames: names,
           ExpressionAttributeValues: values,
         }),
       );
