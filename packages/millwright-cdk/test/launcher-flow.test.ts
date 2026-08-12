@@ -508,6 +508,60 @@ describe('concurrency gating', () => {
     expect(starter.startedRuns).toEqual(['octocat/app#deploy#1']);
   });
 
+  it('loses the running-slot race cleanly: re-reads and queues behind the winner', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', GATED);
+    // Between this launcher's read (slot free) and its conditional claim, a
+    // concurrent launcher claims the running slot for another run.
+    const claimRunning = store.claimRunningSlot.bind(store);
+    let injected = false;
+    store.claimRunningSlot = async (group, runId) => {
+      if (!injected) {
+        injected = true;
+        await claimRunning(group, 'octocat/lib#deploy#9');
+      }
+      return claimRunning(group, runId);
+    };
+
+    const result = await processBusEvent(deps, pushEvent(), NOW);
+    expect(result).toMatchObject({ outcome: 'runs', queued: ['octocat/app#deploy#1'] });
+    expect(store.groups.get('deploy-main')).toEqual({
+      running: 'octocat/lib#deploy#9',
+      pending: 'octocat/app#deploy#1',
+    });
+    expect(starter.startedRuns).toEqual([]);
+  });
+
+  it('loses the pending-slot race cleanly: the winner is superseded, never double-claimed', async () => {
+    const { deps, store } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', GATED);
+    await processBusEvent(deps, pushEvent(), NOW); // #1 running
+    // A concurrent launcher's waiter (another repo, same deployment-global
+    // group) lands between this launcher's read and its conditional claim.
+    store.putRun({ repo: 'octocat/lib', workflow: 'deploy', runNumber: 1 }, { status: 'QUEUED' });
+    const claimPending = store.claimPendingSlot.bind(store);
+    let injected = false;
+    store.claimPendingSlot = async (group, runId, opts, nowMs) => {
+      if (!injected) {
+        injected = true;
+        store.groups.set(group, { ...store.groups.get(group)!, pending: 'octocat/lib#deploy#1' });
+      }
+      return claimPending(group, runId, opts, nowMs);
+    };
+
+    const result = await processBusEvent(deps, pushEvent({ sha: 'd'.repeat(40) }), NOW + 1000);
+    // The first conditional write fails on the stale read; the retry adopts
+    // slot-of-one semantics and replaces the winner instead of stacking up.
+    expect(result).toMatchObject({ outcome: 'runs', queued: ['octocat/app#deploy#2'] });
+    expect(store.groups.get('deploy-main')).toEqual({
+      running: 'octocat/app#deploy#1',
+      pending: 'octocat/app#deploy#2',
+    });
+    expect(
+      await store.getRun({ repo: 'octocat/lib', workflow: 'deploy', runNumber: 1 }),
+    ).toMatchObject({ status: 'CANCELLED', reason: 'superseded' });
+  });
+
   it('redelivery after queueing leaves the queued run untouched', async () => {
     const { deps, store, starter } = harness();
     store.putRegistry('octocat/app', 'refs/heads/main', GATED);
