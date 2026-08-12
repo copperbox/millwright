@@ -53,3 +53,14 @@ The deployed construct self-registers a manifest at
 `/millwright/<name>/manifest`; the CLI discovers it with zero configuration
 when the account+region has exactly one deployment (otherwise set
 `MILLWRIGHT_DEPLOYMENT` or pass `--deployment`).
+
+### Checks and branch protection
+
+Every cloud run reports to its commit sha: one check per job named
+`<workflow> / <job>`, plus a `<workflow> / synth` check per run that is
+created `in_progress` at run start and fails with the synth error in its
+summary when `millwright/workflows.ts` is broken. In branch protection,
+require the gating workflows' `<workflow> / synth` contexts (and whichever
+job contexts should gate) — not `millwright / synth`, which only
+bootstrap-only executions report. PAT-mode deployments report commit
+statuses under identical context names, so the same required contexts work.
