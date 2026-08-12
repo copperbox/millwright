@@ -1,0 +1,27 @@
+{
+  "name": "@copperbox/millwright-state",
+  "version": "0.1.0",
+  "description": "Millwright's shared data-plane helpers — state/polling table item accessors, SSM config-plane paths, S3 layout",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/copperbox/millwright.git",
+    "directory": "packages/millwright-state"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
