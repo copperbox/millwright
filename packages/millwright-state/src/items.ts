@@ -14,9 +14,6 @@ import { TriggerKind } from './keys';
 
 export type RunStatus = 'PENDING' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
-/** Run statuses with no further transitions — the only rerun-able sources. */
-export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
-
 export type JobStatus =
   | 'PENDING'
   | 'QUEUED'
@@ -27,12 +24,6 @@ export type JobStatus =
   | 'TIMED_OUT'
   | 'CANCELLED'
   | 'SKIPPED';
-
-/**
- * Job statuses `rerun --failed` re-executes (spec §7.7). Their SKIPPED
- * dependents rerun with them; SUCCEEDED jobs' outputs are reused instead.
- */
-export const RERUNNABLE_JOB_STATUSES: readonly JobStatus[] = ['FAILED', 'TIMED_OUT', 'CANCELLED'];
 
 export type StepStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'SKIPPED';
 
@@ -74,12 +65,6 @@ export interface RunItem extends ExpiringItem {
   readonly cancelRequested?: boolean;
   /** Run id this run is a rerun of. */
   readonly rerunOf?: string;
-  /**
-   * `rerun --failed`: jobs whose succeeded outputs were prefix-copied from
-   * {@link rerunOf} — the decider seeds them terminal SUCCEEDED with
-   * `reusedFrom` instead of dispatching them.
-   */
-  readonly reuseJobs?: readonly string[];
   /** e.g. `superseded` on concurrency-policy cancellation. */
   readonly reason?: string;
   /** Typed inputs carried by a `dispatch` trigger. */
@@ -122,8 +107,6 @@ export interface StepItem extends ExpiringItem {
   readonly stepIndex: number;
   readonly status: StepStatus;
   readonly name?: string;
-  /** Present only on SKIPPED — a step only ever skips via its own `skipIf`. */
-  readonly reason?: Extract<SkipReason, 'skip_if'>;
   readonly startedAt?: string;
   readonly finishedAt?: string;
 }

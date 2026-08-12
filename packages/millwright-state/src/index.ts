@@ -18,6 +18,7 @@ export {
   checkStateKey,
   concurrencyGroupKey,
   eventDedupeKey,
+  formatRunId,
   invertedRunNumber,
   jobKey,
   parseBuildMappingKey,
@@ -28,10 +29,9 @@ export {
   parseJobKey,
   parseRegistryKey,
   parseRunCounterKey,
+  parseRunId,
   parseRunKey,
   parseStepKey,
-  formatRunId,
-  parseRunId,
   registryKey,
   runCounterKey,
   runKey,
@@ -63,7 +63,6 @@ export {
   EventDedupeItem,
   JobItem,
   JobStatus,
-  RERUNNABLE_JOB_STATUSES,
   RegistryItem,
   RegistryWorkflowEntry,
   RunCounterItem,
@@ -72,7 +71,6 @@ export {
   SkipReason,
   StepItem,
   StepStatus,
-  TERMINAL_RUN_STATUSES,
 } from './items';
 export {
   BuildOutcome,
@@ -105,6 +103,36 @@ export {
   workflowFromModel,
 } from './run-model';
 export {
+  JOB_ROLE_INLINE_POLICY_NAME,
+  JOB_ROLE_NAME_MAX_LENGTH,
+  JOB_ROLE_NAME_PREFIX,
+  JOB_ROLE_TAG_KEYS,
+  JOB_ROLE_VARIANTS,
+  JobRoleIdentity,
+  JobRoleVariant,
+  STALE_JOB_ROLE_RETENTION_DAYS,
+  jobRoleIdentityFromTags,
+  jobRoleName,
+  jobRoleNamePair,
+  jobRolePath,
+  jobRoleTags,
+} from './job-roles';
+export {
+  JobRolePolicyContext,
+  JobRoleSecretGrants,
+  PolicyDocument,
+  PolicyStatement,
+  fullPolicyDocument,
+  jobRolePolicyHash,
+  jobRoleTrustPolicy,
+  noSecretPolicyDocument,
+} from './job-role-policies';
+export {
+  matchesAllowedRefPattern,
+  refReceivesSecrets,
+  selectJobRoleVariant,
+} from './secrets-refs';
+export {
   BUILD_MAPPING_TTL_SECONDS,
   DEFAULT_METADATA_RETENTION_DAYS,
   EVENT_DEDUPE_TTL_SECONDS,
@@ -126,28 +154,12 @@ export {
   validateStepEvent,
 } from './step-events';
 export {
-  BuildspecContext,
-  CACHE_URI_ENV,
-  OUT_URI_ENV,
-  RESERVED_ENV_PREFIXES,
-  RenderedBuildspec,
-  SHIM_BINARY_NAME,
-  SHIM_DIR_ENV,
-  SHIM_SOURCE_IDENTIFIER,
-  buildspecForJob,
-  dataPlaneEnvironment,
-  isReservedEnvName,
-  renderJobBuildspec,
-  runInputSourceLocation,
-  shellQuote,
-  shimSourceLocation,
-} from './buildspec';
-export {
   CIRCUIT_BREAKER_KEY,
   PR_ETAG_SORT_KEY,
   ParsedPollingKey,
   PollingRowKind,
   QUARANTINE_SORT_KEY,
+  RECONCILED_HOST_KEYS_KEY,
   REF_MAP_SORT_KEY,
   cronLastFiredKey,
   parseRepoPollingKey,
@@ -167,11 +179,14 @@ export {
   secretParameterName,
 } from './ssm-paths';
 export {
+  DEFAULT_REPO_POLLING_CONFIG,
   ForkPrPolicy,
   RepoConfig,
   RepoConfigFormatError,
+  RepoPollingConfig,
   defaultRepoConfig,
   parseRepoConfig,
+  parseRepoPollingConfig,
   serializeRepoConfig,
 } from './repo-config';
 export {
@@ -182,6 +197,14 @@ export {
   parseGithubCredentials,
   serializeGithubCredentials,
 } from './github-credentials';
+export {
+  RoleVariant,
+  gateJobSecrets,
+  matchesAnyRefPattern,
+  matchesRefPattern,
+  secretsAllowedRefsFromConfig,
+  selectRoleVariant,
+} from './secrets-gate';
 export {
   BOOTSTRAP_SYNTH_CONTEXT,
   CHECK_ABANDON_AFTER_DAYS,
@@ -211,6 +234,23 @@ export {
   serializeDesiredCheckState,
   synthCheckContext,
 } from './checks';
+export {
+  BuildspecContext,
+  CACHE_URI_ENV,
+  OUT_URI_ENV,
+  RESERVED_ENV_PREFIXES,
+  RenderedBuildspec,
+  SHIM_BINARY_NAME,
+  SHIM_DIR_ENV,
+  SHIM_SOURCE_IDENTIFIER,
+  buildspecForJob,
+  dataPlaneEnvironment,
+  isReservedEnvName,
+  renderJobBuildspec,
+  runInputSourceLocation,
+  shellQuote,
+  shimSourceLocation,
+} from './buildspec';
 export {
   CACHE_PREFIX,
   CONTROL_PREFIX,

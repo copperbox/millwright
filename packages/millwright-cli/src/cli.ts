@@ -17,6 +17,7 @@ import { Command } from 'commander';
 import { CommandError } from './config-plane';
 import { DefinitionLoadError } from './definition-loader';
 import { DEPLOYMENT_ENV_VAR, DiscoveryError } from './discovery';
+import { DispatchError, createDispatchDeps, dispatch } from './dispatch';
 import { DoctorDeps, doctor } from './doctor';
 import { GitProtocolError } from './git/ls-refs';
 import { HostKeyMismatchError } from './git/ssh';
@@ -33,6 +34,7 @@ import { RepoDeps, repoAdd, repoList, repoRemove, repoUpdate } from './repo';
 import { RunsDeps, runsList, runsShow, runsShowLocal } from './runs';
 import { secretsSet } from './secrets';
 import { SetupDeps, refreshHostKeys, setup } from './setup';
+import { DEFAULT_ENTRY, runSynthCommand } from './synth-command';
 import { VERSION } from './version';
 
 function output(line: string): void {
@@ -172,6 +174,49 @@ export function buildProgram(): Command {
       }
       process.stdout.write('Next: npm install && npx cdk deploy, then millwright setup.\n');
     });
+
+  program
+    .command('synth')
+    .description('compile millwright/workflows.ts to the JSON run model')
+    .option('--entry <path>', 'definition entry point', DEFAULT_ENTRY)
+    .option('--repo <owner/name>', 'repo identity (default: derived from the git remote "origin")')
+    .option('--commit <sha>', 'commit synthesized at (default: git HEAD)')
+    .option('--ref <name>', 'short name of the triggering ref, e.g. main or release/1.2')
+    .option('--out <file>', 'write the model to a file instead of stdout')
+    .option(
+      '--schema-ceiling <version>',
+      "the control plane's supported run-model schemaVersion (cloud synth passes this)",
+      (value: string) => Number.parseInt(value, 10),
+    )
+    .option(
+      '--poll-cadence <minutes>',
+      'deployment poll cadence, enables the cron granularity lint',
+      (value: string) => Number.parseInt(value, 10),
+    )
+    .option(
+      '--secrets-allowed-refs <patterns>',
+      "comma-separated secretsAllowedRefs patterns (fail-fast lint only; enforcement is the decider's)",
+      (value: string) => value.split(',').map((p) => p.trim()).filter((p) => p.length > 0),
+    )
+    .option('--pretty', 'pretty-print the JSON model')
+    .action(
+      (options: {
+        entry: string;
+        repo?: string;
+        commit?: string;
+        ref?: string;
+        out?: string;
+        schemaCeiling?: number;
+        pollCadence?: number;
+        secretsAllowedRefs?: string[];
+        pretty?: boolean;
+      }) => {
+        const code = runSynthCommand(options);
+        if (code !== 0) {
+          process.exitCode = code;
+        }
+      },
+    );
 
   program
     .command('setup')
@@ -315,6 +360,34 @@ export function buildProgram(): Command {
       },
     );
 
+  program
+    .command('dispatch')
+    .description(
+      'start a cloud run of a workflow — always at a ref (default: the default-branch head), ' +
+        'resolved to a sha so definition and source are pinned together',
+    )
+    .argument('<workflow>', 'workflow name as declared in workflows.ts')
+    .option('--ref <ref>', 'branch, tag or full ref to run at')
+    .option(
+      '--input <k=v>',
+      'typed workflow input (repeatable); validated against Trigger.manual',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option('--repo <owner/name>', 'repo override when not run from a checkout of it')
+    .action(async (workflow: string, options: { ref?: string; input: string[]; repo?: string }) => {
+      await dispatch(
+        {
+          workflow,
+          ref: options.ref,
+          inputs: options.input,
+          repo: options.repo,
+          deployment: program.opts().deployment,
+        },
+        createDispatchDeps(),
+      );
+    });
+
   const runs = program.command('runs').description('inspect runs recorded in the state table');
 
   runs
@@ -395,6 +468,7 @@ const USER_FACING_ERRORS = [
   KeyFormatError,
   RunModelError,
   DefinitionLoadError,
+  DispatchError,
 ];
 
 export async function main(argv: readonly string[]): Promise<number> {

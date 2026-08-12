@@ -27,10 +27,10 @@ export type BusEventSource = (typeof BUS_EVENT_SOURCES)[number];
 
 /**
  * The ONLY source each kind is accepted from. `push`/`branch`/`tag`/`pr`/
- * `cron` are poller observations; `dispatch`/`bootstrap`/`rerun` are
- * operator actions. No kind is ever legal from `millwright.step` — step
- * events carry their own detail types and are consumed by the step-events
- * writer, never the launcher.
+ * `cron` are poller observations; `dispatch`/`bootstrap` are operator
+ * actions. No kind is ever legal from `millwright.step` — step events carry
+ * their own detail types and are consumed by the step-events writer, never
+ * the launcher.
  */
 export const EVENT_KIND_SOURCE: Readonly<Record<TriggerKind, BusEventSource>> = {
   push: POLLER_EVENT_SOURCE,
@@ -40,7 +40,6 @@ export const EVENT_KIND_SOURCE: Readonly<Record<TriggerKind, BusEventSource>> = 
   cron: POLLER_EVENT_SOURCE,
   dispatch: CLI_EVENT_SOURCE,
   bootstrap: CLI_EVENT_SOURCE,
-  rerun: CLI_EVENT_SOURCE,
 };
 
 export const BRANCH_REF_PREFIX = 'refs/heads/';
@@ -82,16 +81,6 @@ export interface BusEventDetail {
   readonly minute?: string;
   /** Typed inputs on a `dispatch` event. */
   readonly inputs?: Readonly<Record<string, DispatchInputValue>>;
-  /** Number of the run being rerun — required on `rerun` events. */
-  readonly sourceRunNumber?: number;
-  /** `runs rerun --failed`: reuse the source run's succeeded outputs. */
-  readonly failedOnly?: boolean;
-  /**
-   * Per-invocation dedupe qualifier on `rerun` events: SQS redeliveries of
-   * one command coalesce while each new `runs rerun` invocation starts a
-   * fresh run.
-   */
-  readonly nonce?: string;
 }
 
 /** A bus event that passed static source/shape validation. */
@@ -105,9 +94,6 @@ export interface ValidBusEvent {
   readonly workflow?: string;
   readonly minute?: string;
   readonly inputs?: Readonly<Record<string, DispatchInputValue>>;
-  readonly sourceRunNumber?: number;
-  readonly failedOnly?: boolean;
-  readonly nonce?: string;
 }
 
 export type BusEventValidation =
@@ -124,11 +110,9 @@ const REF_PREFIX_BY_KIND: Readonly<Record<TriggerKind, string>> = {
   tag: TAG_REF_PREFIX,
   pr: PR_REF_PREFIX,
   cron: BRANCH_REF_PREFIX,
-  // dispatch may target any ref namespace the CLI resolved; rerun carries
-  // the source run's ref verbatim, whatever namespace it lives in.
+  // dispatch may target any ref namespace the CLI resolved.
   dispatch: 'refs/',
   bootstrap: BRANCH_REF_PREFIX,
-  rerun: 'refs/',
 };
 
 function reject(reason: string): BusEventValidation {
@@ -188,32 +172,11 @@ export function validateBusEvent(
   }
 
   let workflow: string | undefined;
-  if (kind === 'cron' || kind === 'dispatch' || kind === 'rerun') {
+  if (kind === 'cron' || kind === 'dispatch') {
     if (typeof d.workflow !== 'string' || !d.workflow || d.workflow.includes('#')) {
       return reject(`a "${kind}" event must name its target workflow`);
     }
     workflow = d.workflow;
-  }
-  let sourceRunNumber: number | undefined;
-  let failedOnly: boolean | undefined;
-  let nonce: string | undefined;
-  if (kind === 'rerun') {
-    if (
-      typeof d.sourceRunNumber !== 'number' ||
-      !Number.isInteger(d.sourceRunNumber) ||
-      d.sourceRunNumber < 1
-    ) {
-      return reject('a "rerun" event must carry the source run number');
-    }
-    sourceRunNumber = d.sourceRunNumber;
-    if (d.failedOnly !== undefined && typeof d.failedOnly !== 'boolean') {
-      return reject('a "rerun" event\'s failedOnly must be a boolean');
-    }
-    failedOnly = d.failedOnly === true;
-    if (typeof d.nonce !== 'string' || !d.nonce || /[\s#]/.test(d.nonce)) {
-      return reject('a "rerun" event must carry a nonce free of whitespace and "#"');
-    }
-    nonce = d.nonce;
   }
   let minute: string | undefined;
   if (kind === 'cron') {
@@ -247,9 +210,6 @@ export function validateBusEvent(
       workflow,
       minute,
       inputs,
-      sourceRunNumber,
-      failedOnly,
-      nonce,
     },
   };
 }

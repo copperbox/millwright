@@ -9,7 +9,11 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { Boundary } from './boundary';
 import { DataStores } from './data-stores';
+import { MillwrightEventBus } from './event-bus';
+import { Launcher } from './launcher';
+import { Poller } from './poller';
 import { Reporter } from './reporter';
+import { SynthJob } from './synth-job';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -90,6 +94,14 @@ export class Millwright extends Construct {
   readonly configKey: kms.Key;
   /** C17 — the log group receiving one stream per build. */
   readonly buildLogGroup: logs.LogGroup;
+  /** C11 + the synth phase (spec §7.2): project, synth job, post-synth step. */
+  readonly synthJob: SynthJob;
+  /** C3 — the event bus with its source-conditioned resource policy. */
+  readonly eventBus: MillwrightEventBus;
+  /** C4 — the launcher consuming trigger events from the bus. */
+  readonly launcher: Launcher;
+  /** C2 — the tier-1 SSH ls-refs poller and its tick schedule. */
+  readonly poller: Poller;
   /** C8 — the reporter: sole owner of check reconciliation to GitHub. */
   readonly reporter: Reporter;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
@@ -156,6 +168,36 @@ export class Millwright extends Construct {
     this.configKey = stores.configKey;
     this.buildLogGroup = stores.buildLogGroup;
 
+    this.synthJob = new SynthJob(this, 'SynthJob', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      artifactBucket: this.artifactBucket,
+      configKey: this.configKey,
+      buildLogGroup: this.buildLogGroup,
+      metadataRetention: this.metadataRetention,
+      pollCadence: this.pollCadence,
+    });
+
+    this.eventBus = new MillwrightEventBus(this, 'EventBus', {
+      deploymentName: this.deploymentName,
+    });
+    this.launcher = new Launcher(this, 'Launcher', {
+      deploymentName: this.deploymentName,
+      bus: this.eventBus.bus,
+      stateTable: this.stateTable,
+      artifactBucket: this.artifactBucket,
+      metadataRetention: this.metadataRetention,
+    });
+    this.poller = new Poller(this, 'Poller', {
+      deploymentName: this.deploymentName,
+      pollCadence: this.pollCadence,
+      pollingTable: this.pollingTable,
+      stateTable: this.stateTable,
+      busName: this.eventBus.busName,
+      pollerRoleName: this.eventBus.pollerRoleName,
+      configKey: this.configKey,
+    });
+
     this.reporter = new Reporter(this, 'Reporter', {
       deploymentName: this.deploymentName,
       stateTable: this.stateTable,
@@ -188,6 +230,8 @@ export class Millwright extends Construct {
           buildLogGroup: stores.buildLogGroupName,
           configKeyArn: this.configKey.keyArn,
           configKeyAlias: stores.configKeyAlias,
+          // The CLI's dispatch/bootstrap PutEvents target.
+          eventBus: this.eventBus.busName,
         },
       }),
     });
