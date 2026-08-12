@@ -1,5 +1,37 @@
 export { SCHEMA_VERSION } from './schema';
 export {
+  RunModel,
+  WorkflowModel,
+  ConcurrencyModel,
+  TriggerModel,
+  PushTriggerModel,
+  TagTriggerModel,
+  PullRequestTriggerModel,
+  CronTriggerModel,
+  ManualTriggerModel,
+  ManualInputModel,
+  JobModel,
+  ComputeModel,
+  StepModel,
+  SecretModel,
+  ArtifactModel,
+  ArtifactRefModel,
+  CacheModel,
+  CacheKeyPartModel,
+} from './model';
+export { Diagnostic, SynthError, formatDiagnostic } from './diagnostics';
+export { synthesize, SynthOptions, SynthResult, DispatchOptions } from './synth';
+export {
+  validateRunModel,
+  assertValidRunModel,
+  ValidationIssue,
+  ValidationResult,
+  ValidateOptions,
+  RunModelValidationError,
+} from './validate';
+export { matchesRefPattern, matchesAnyRefPattern } from './refs';
+export { minCronIntervalMinutes, CronParseError } from './cron';
+export {
   Trigger,
   TriggerKind,
   PushTriggerOptions,
