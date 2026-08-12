@@ -13,6 +13,7 @@ import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
 import { RunExecutor } from './run-executor';
+import { StepEventsWriter } from './step-events-writer';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -101,6 +102,8 @@ export class Millwright extends Construct {
   readonly runExecutor: RunExecutor;
   /** C11 — the single CodeBuild project every job runs on. */
   readonly buildProject: BuildProject;
+  /** C19 — the step-events writer projecting shim events into step rows. */
+  readonly stepEventsWriter: StepEventsWriter;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -185,6 +188,12 @@ export class Millwright extends Construct {
       deploymentName: this.deploymentName,
       artifactBucket: this.artifactBucket,
       buildLogGroup: this.buildLogGroup,
+    });
+    this.stepEventsWriter = new StepEventsWriter(this, 'StepEventsWriter', {
+      deploymentName: this.deploymentName,
+      bus: this.eventBus.bus,
+      stateTable: this.stateTable,
+      metadataRetention: this.metadataRetention,
     });
 
     // Self-registered deployment manifest: the CLI lists /millwright/*/manifest
