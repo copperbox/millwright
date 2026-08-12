@@ -53,6 +53,37 @@ export {
   StepStatus,
 } from './items';
 export {
+  JOB_ROLE_INLINE_POLICY_NAME,
+  JOB_ROLE_NAME_MAX_LENGTH,
+  JOB_ROLE_NAME_PREFIX,
+  JOB_ROLE_TAG_KEYS,
+  JOB_ROLE_VARIANTS,
+  JobRoleIdentity,
+  JobRoleVariant,
+  STALE_JOB_ROLE_RETENTION_DAYS,
+  jobRoleIdentityFromTags,
+  jobRoleName,
+  jobRoleNamePair,
+  jobRolePath,
+  jobRoleTags,
+} from './job-roles';
+export {
+  JobRolePolicyContext,
+  JobRoleSecretGrants,
+  PolicyDocument,
+  PolicyStatement,
+  fullPolicyDocument,
+  jobRolePolicyHash,
+  jobRoleTrustPolicy,
+  noSecretPolicyDocument,
+} from './job-role-policies';
+export {
+  matchesAllowedRefPattern,
+  refReceivesSecrets,
+  selectJobRoleVariant,
+  shortRefName,
+} from './secrets-refs';
+export {
   DEFAULT_METADATA_RETENTION_DAYS,
   EVENT_DEDUPE_TTL_SECONDS,
   TTL_ATTRIBUTE,
