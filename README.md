@@ -45,3 +45,24 @@ The deployed construct self-registers a manifest at
 `/millwright/<name>/manifest`; the CLI discovers it with zero configuration
 when the account+region has exactly one deployment (otherwise set
 `MILLWRIGHT_DEPLOYMENT` or pass `--deployment`).
+
+## Defining workflows (watched repos)
+
+Workflows live at `millwright/workflows.ts` in the watched repo, written with
+`@copperbox/millwright-workflows` (see that package's README for the API):
+
+```ts
+import { WorkflowSet, Workflow, Trigger } from '@copperbox/millwright-workflows';
+
+const app = new WorkflowSet();
+const ci = new Workflow(app, 'ci', { on: [Trigger.push({ branches: ['main'] })] });
+ci.job('build', {
+  image: 'public.ecr.aws/docker/library/node:22',
+  steps: ['npm ci', 'npm test'],
+});
+export default app;
+```
+
+`npx millwright synth` compiles the definition to the JSON run model — the
+contract between definition, cloud orchestration, and the local runner —
+printing synth-time errors and lints to stderr.

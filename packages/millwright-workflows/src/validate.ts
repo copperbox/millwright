@@ -210,11 +210,8 @@ function checkCache(c: Checker, cache: unknown, path: string): void {
       }
     });
   }
-  if (c.isArray(cache.paths, `${path}.paths`, 'cache paths') && cache.paths.length === 0) {
+  if (c.stringArray(cache.paths, `${path}.paths`, 'cache paths') && cache.paths.length === 0) {
     c.fail(`${path}.paths`, 'cache needs at least one path');
-  }
-  if (Array.isArray(cache.paths)) {
-    c.stringArray(cache.paths, `${path}.paths`, 'cache paths');
   }
   c.stringArray(cache.restoreKeys ?? [], `${path}.restoreKeys`, 'restoreKeys');
 }
