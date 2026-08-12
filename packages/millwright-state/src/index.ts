@@ -136,9 +136,28 @@ export {
   secretParameterName,
 } from './ssm-paths';
 export {
+  BuildspecContext,
+  CACHE_URI_ENV,
+  OUT_URI_ENV,
+  RESERVED_ENV_PREFIXES,
+  RenderedBuildspec,
+  SHIM_BINARY_NAME,
+  SHIM_DIR_ENV,
+  SHIM_SOURCE_IDENTIFIER,
+  buildspecForJob,
+  dataPlaneEnvironment,
+  isReservedEnvName,
+  renderJobBuildspec,
+  runInputSourceLocation,
+  shellQuote,
+  shimSourceLocation,
+} from './buildspec';
+export {
   CACHE_PREFIX,
+  CONTROL_PREFIX,
   MODEL_OBJECT_NAME,
   RUNS_PREFIX,
+  SHIM_PREFIX,
   SOURCE_OBJECT_NAME,
   artifactPrefix,
   cacheObjectKey,
