@@ -9,12 +9,12 @@ exports[`renderJobBuildspec > renders a minimal job (snapshot) 1`] = `
   "phases": {
     "pre_build": {
       "commands": [
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" source unpack --archive source.tar.gz"
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" source unpack --archive source.tar.gz"
       ]
     },
     "build": {
       "commands": [
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 0 -- 'make'"
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 0 -- 'make'"
       ]
     }
   }
@@ -42,21 +42,21 @@ exports[`renderJobBuildspec > renders the full acceptance-criteria job (snapshot
     },
     "pre_build": {
       "commands": [
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" source unpack --archive source.tar.gz",
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" artifact fetch --job 'build' --name 'dist'",
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" cache restore --key 'npm-abc123' --restore-key 'npm-' --path 'node_modules'"
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" source unpack --archive source.tar.gz",
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" artifact fetch --job 'build' --name 'dist'",
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" cache restore --key 'npm-abc123' --restore-key 'npm-' --path 'node_modules'"
       ]
     },
     "build": {
       "commands": [
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 0 -- 'npm ci && npm run build'",
-        "\\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 1 --name 'publish' --skip-if 'npm view myapp@$MILLWRIGHT_SHA version' -- 'npm publish'"
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 0 -- 'npm ci && npm run build'",
+        "sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" step --index 1 --name 'publish' --skip-if 'npm view myapp@$MILLWRIGHT_SHA version' -- 'npm publish'"
       ]
     },
     "post_build": {
       "commands": [
-        "if [ \\"\${CODEBUILD_BUILD_SUCCEEDING:-1}\\" = \\"1\\" ]; then \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" artifact upload --name 'packed' --path 'out/pack'; fi",
-        "if [ \\"\${CODEBUILD_BUILD_SUCCEEDING:-1}\\" = \\"1\\" ]; then \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" cache save --key 'npm-abc123' --path 'node_modules'; fi"
+        "if [ \\"\${CODEBUILD_BUILD_SUCCEEDING:-1}\\" = \\"1\\" ]; then sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" artifact upload --name 'packed' --path 'out/pack'; fi",
+        "if [ \\"\${CODEBUILD_BUILD_SUCCEEDING:-1}\\" = \\"1\\" ]; then sh \\"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim\\" cache save --key 'npm-abc123' --path 'node_modules'; fi"
       ]
     }
   }

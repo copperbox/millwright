@@ -35,6 +35,7 @@ function stubRunner(
       projectName: 'ci-builds',
       bucketName: 'bkt',
       deploymentName: 'ci',
+      eventBusName: 'ci-bus',
     }),
     started,
   };
@@ -109,6 +110,7 @@ describe('per-job dispatch overrides (spec §7.4)', () => {
       MILLWRIGHT_JOB: 'build',
       MILLWRIGHT_SHA: 'a'.repeat(40),
       MILLWRIGHT_REF: 'refs/heads/main',
+      MILLWRIGHT_EVENT_BUS: 'ci-bus',
       MILLWRIGHT_OUT_URI: 's3://bkt/runs/octo/app/ci/7/out',
       MILLWRIGHT_CACHE_URI: 's3://bkt/cache/octo/app',
       STAGE: 'prod',

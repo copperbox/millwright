@@ -14,6 +14,7 @@ function synth(): { executor: RunExecutor; template: Template } {
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
     }),
     artifactBucket: new s3.Bucket(stack, 'Artifacts'),
+    eventBusName: 'ci-bus',
     metadataRetention: Duration.days(90),
   });
   return { executor, template: Template.fromStack(stack) };

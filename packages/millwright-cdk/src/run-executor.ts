@@ -19,6 +19,8 @@ export interface RunExecutorProps {
   readonly stateTable: dynamodb.ITable;
   /** C12 — where the decider reads each run's `in/model.json`. */
   readonly artifactBucket: s3.IBucket;
+  /** C3 — the bus name dispatch hands the shim for step-event PutEvents. */
+  readonly eventBusName: string;
   /** State-table TTL horizon stamped onto decider-written rows. */
   readonly metadataRetention: Duration;
 }
@@ -92,6 +94,7 @@ export class RunExecutor extends Construct {
         ARTIFACT_BUCKET_NAME: props.artifactBucket.bucketName,
         BUILD_PROJECT_NAME: this.buildProjectName,
         DEPLOYMENT_NAME: name,
+        EVENT_BUS_NAME: props.eventBusName,
         METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),
       },
       bundling: {

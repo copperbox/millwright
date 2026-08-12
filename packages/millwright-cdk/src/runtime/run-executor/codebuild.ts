@@ -7,6 +7,7 @@ import {
 } from '@aws-sdk/client-codebuild';
 import {
   BuildOutcome,
+  EVENT_BUS_ENV,
   RunModelCompute,
   RunModelJob,
   SHIM_SOURCE_IDENTIFIER,
@@ -67,6 +68,8 @@ export interface CodeBuildRunnerConfig {
   readonly bucketName: string;
   /** Roots the SSM paths the renderer resolves secret references to. */
   readonly deploymentName: string;
+  /** The deployment bus the shim's step events PutEvents onto (spec §7.8). */
+  readonly eventBusName: string;
 }
 
 export class CodeBuildRunner implements BuildRunner {
@@ -79,7 +82,7 @@ export class CodeBuildRunner implements BuildRunner {
     job: RunModelJob,
     ctx: DispatchContext,
   ): Promise<{ buildId: string; buildArn?: string }> {
-    const { projectName, bucketName, deploymentName } = this.config;
+    const { projectName, bucketName, deploymentName, eventBusName } = this.config;
     // Identity and data-plane roots first; declared env after, minus the
     // reserved namespaces — a definition must not overwrite job identity,
     // agent state or the build role's credentials.
@@ -88,6 +91,7 @@ export class CodeBuildRunner implements BuildRunner {
       { name: 'MILLWRIGHT_JOB', value: job.name },
       { name: 'MILLWRIGHT_SHA', value: ctx.sha },
       { name: 'MILLWRIGHT_REF', value: ctx.ref },
+      { name: EVENT_BUS_ENV, value: eventBusName },
       ...Object.entries(dataPlaneEnvironment(ctx.coords, bucketName)).map(([name, value]) => ({
         name,
         value,

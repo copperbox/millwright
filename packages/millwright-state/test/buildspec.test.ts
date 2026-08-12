@@ -94,7 +94,7 @@ describe('buildspec shape (spec §11.2)', () => {
   it('shim-wraps every step and passes skipIf through', () => {
     const spec = buildspecForJob(FULL_JOB, CTX);
     expect(spec.phases.build.commands[0]).toBe(
-      `"\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim" step ` +
+      `sh "\${MILLWRIGHT_SHIM_DIR:-$CODEBUILD_SRC_DIR_shim}/millwright-shim" step ` +
         `--index 0 -- 'npm ci && npm run build'`,
     );
     expect(spec.phases.build.commands[1]).toContain(

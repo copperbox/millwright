@@ -71,9 +71,12 @@ export function shellQuote(value: string): string {
 /**
  * The shim invocation fragment: the local runner's bind-mount env var wins,
  * CodeBuild's secondary-source dir is the cloud default. Inlined into every
- * command so no cross-command shell state is ever assumed.
+ * command so no cross-command shell state is ever assumed. Invoked through
+ * `sh` because S3 materialization strips execute bits — the delivered
+ * `millwright-shim` entry is a POSIX-sh dispatcher that execs the real
+ * per-arch binary beside it.
  */
-const SHIM = `"\${${SHIM_DIR_ENV}:-$CODEBUILD_SRC_DIR_${SHIM_SOURCE_IDENTIFIER}}/${SHIM_BINARY_NAME}"`;
+const SHIM = `sh "\${${SHIM_DIR_ENV}:-$CODEBUILD_SRC_DIR_${SHIM_SOURCE_IDENTIFIER}}/${SHIM_BINARY_NAME}"`;
 
 /**
  * Post-build phases run even after a failed build phase; artifact upload and

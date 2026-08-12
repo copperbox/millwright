@@ -66,6 +66,7 @@ function dependencies(): DeciderDeps {
         projectName: requireEnv('BUILD_PROJECT_NAME'),
         bucketName: requireEnv('ARTIFACT_BUCKET_NAME'),
         deploymentName: requireEnv('DEPLOYMENT_NAME'),
+        eventBusName: requireEnv('EVENT_BUS_NAME'),
       }),
       models: new S3ModelSource(new S3Client({}), requireEnv('ARTIFACT_BUCKET_NAME')),
       sender: new SfnTokenSender(new SFNClient({})),

@@ -13,6 +13,7 @@ import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
 import { RunExecutor } from './run-executor';
+import { ShimAssets } from './shim-assets';
 import { StepEventsWriter } from './step-events-writer';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
@@ -102,6 +103,8 @@ export class Millwright extends Construct {
   readonly runExecutor: RunExecutor;
   /** C11 — the single CodeBuild project every job runs on. */
   readonly buildProject: BuildProject;
+  /** C13 — the step-shim delivery under the bucket's `control/shim/`. */
+  readonly shimAssets: ShimAssets;
   /** C19 — the step-events writer projecting shim events into step rows. */
   readonly stepEventsWriter: StepEventsWriter;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
@@ -182,12 +185,17 @@ export class Millwright extends Construct {
       deploymentName: this.deploymentName,
       stateTable: this.stateTable,
       artifactBucket: this.artifactBucket,
+      eventBusName: this.eventBus.busName,
       metadataRetention: this.metadataRetention,
     });
     this.buildProject = new BuildProject(this, 'BuildProject', {
       deploymentName: this.deploymentName,
       artifactBucket: this.artifactBucket,
       buildLogGroup: this.buildLogGroup,
+    });
+    this.shimAssets = new ShimAssets(this, 'ShimAssets', {
+      deploymentName: this.deploymentName,
+      artifactBucket: this.artifactBucket,
     });
     this.stepEventsWriter = new StepEventsWriter(this, 'StepEventsWriter', {
       deploymentName: this.deploymentName,
