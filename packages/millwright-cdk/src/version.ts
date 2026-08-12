@@ -1,5 +1,5 @@
 // Kept in lockstep with package.json by scripts/set-version.mjs — do not edit by hand.
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 
 /**
  * Highest run-model schemaVersion this control plane accepts. Synth fails

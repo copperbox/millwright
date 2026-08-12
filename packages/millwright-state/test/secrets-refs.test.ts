@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import {
-  matchesAllowedRefPattern,
-  refReceivesSecrets,
-  selectJobRoleVariant,
-  shortRefName,
-} from '../src';
+import { matchesAllowedRefPattern, refReceivesSecrets, selectJobRoleVariant } from '../src';
+// `shortRefName` here is secrets-refs' own ref → short-name-or-undefined helper, distinct
+// from (and not re-exported alongside) the bus-events `shortRefName`, which never returns
+// undefined. Imported directly from the module rather than the package root to avoid a
+// same-name export collision at the public API.
+import { shortRefName } from '../src/secrets-refs';
 
 describe('shortRefName', () => {
   it.each([

@@ -49,6 +49,13 @@ export interface EventIdentity {
   readonly ref: string;
   readonly sha: string;
   readonly kind: TriggerKind;
+  /**
+   * Extra identity segment for kinds whose content identity is finer than
+   * (repo, ref, sha): cron fires carry their UTC minute here, so double-fires
+   * of one minute cancel exactly while distinct minutes on an unchanged head
+   * still run. Absent for every other kind.
+   */
+  readonly qualifier?: string;
 }
 
 export class KeyFormatError extends Error {}
@@ -168,6 +175,30 @@ export function parseRunKey(key: ItemKey): RunCoordinates {
   };
 }
 
+// --- Run id: <repo>#<workflow>#<number> -----------------------------------
+
+/**
+ * The canonical deployment-global run identity, `<repo>#<workflow>#<number>`
+ * (`octocat/app#ci#142`) — what group slots, processing records and `rerunOf`
+ * store, and what the CLI renders repo-scoped as `ci#142`.
+ */
+export function formatRunId(run: RunCoordinates): string {
+  assertSegment('repo', run.repo);
+  assertSegment('workflow', run.workflow);
+  assertRunNumber(run.runNumber);
+  return `${run.repo}#${run.workflow}#${run.runNumber}`;
+}
+
+export function parseRunId(runId: string): RunCoordinates {
+  const parts = runId.split('#');
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !/^\d+$/.test(parts[2])) {
+    throw new KeyFormatError(`Not a run id: "${runId}"`);
+  }
+  const runNumber = Number(parts[2]);
+  assertRunNumber(runNumber);
+  return { repo: parts[0], workflow: parts[1], runNumber };
+}
+
 // --- Job: RUN#<repo>#<workflow>#<number> / JOB#<name> ---------------------
 
 function runPartitionKey(run: RunCoordinates): string {
@@ -232,35 +263,44 @@ export function parseStepKey(key: ItemKey): RunCoordinates & { job: string; step
   return { ...run, job: parts[1], stepIndex: Number(parts[3]) };
 }
 
-// --- Event dedupe / processing record: EVENT#<repo>#<ref>#<sha>#<kind> / -
+// --- Event dedupe / processing record: EVENT#<repo>#<ref>#<sha>#<kind>[#<qualifier>] / -
 
 export function eventDedupeKey(event: EventIdentity): ItemKey {
   assertSegment('repo', event.repo);
   assertNonEmpty('ref', event.ref);
   assertSha(event.sha);
   assertKind(event.kind);
+  if (event.qualifier !== undefined) {
+    assertSegment('qualifier', event.qualifier);
+  }
+  const qualifier = event.qualifier === undefined ? '' : `#${event.qualifier}`;
   return {
-    pk: `EVENT#${event.repo}#${event.ref}#${event.sha}#${event.kind}`,
+    pk: `EVENT#${event.repo}#${event.ref}#${event.sha}#${event.kind}${qualifier}`,
     sk: SINGLETON_SORT_KEY,
   };
 }
 
 /**
  * Refs may legally contain `#`, so the ref is recovered as everything between
- * the repo (which cannot contain `#`) and the trailing sha + kind segments.
+ * the repo (which cannot contain `#`) and the trailing sha + kind (+ optional
+ * qualifier) segments — the kind is found from the end, disambiguated by the
+ * segment before it having to be a sha.
  */
 export function parseEventDedupeKey(key: ItemKey): EventIdentity {
   const parts = key.pk.split('#');
   if (parts.length < 5 || parts[0] !== 'EVENT' || key.sk !== SINGLETON_SORT_KEY) {
     parseFail('event dedupe', key);
   }
-  const kind = parts[parts.length - 1];
-  const sha = parts[parts.length - 2];
+  const last = parts[parts.length - 1];
+  const qualified = !(TRIGGER_KINDS as readonly string[]).includes(last);
+  const qualifier = qualified ? last : undefined;
+  const kind = qualified ? parts[parts.length - 2] : last;
+  const sha = parts[parts.length - (qualified ? 3 : 2)];
   assertKind(kind);
   assertSha(sha);
-  const ref = parts.slice(2, -2).join('#');
+  const ref = parts.slice(2, qualified ? -3 : -2).join('#');
   assertNonEmpty('ref', ref);
-  return { repo: parts[1], ref, sha, kind };
+  return { repo: parts[1], ref, sha, kind, qualifier };
 }
 
 // --- Build mapping: BUILD#<build-id> / - ----------------------------------

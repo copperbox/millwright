@@ -9,6 +9,14 @@ import { ItemKey, KeyFormatError, SINGLETON_SORT_KEY } from './keys';
 /** Quorum circuit-breaker item (spec §6.3) — one per deployment. */
 export const CIRCUIT_BREAKER_KEY: ItemKey = { pk: 'CIRCUIT', sk: SINGLETON_SORT_KEY };
 
+/**
+ * Host-key pins the poller auto-reconciled on a confirmed rotation (spec
+ * §6.1) — one per deployment. Poller-internal state, deliberately NOT the SSM
+ * host-keys parameter: the poller role has no config-plane write access, and
+ * the SSM pin stays operator-owned (`millwright refresh-host-keys`).
+ */
+export const RECONCILED_HOST_KEYS_KEY: ItemKey = { pk: 'HOSTKEYS', sk: SINGLETON_SORT_KEY };
+
 const REPO_PK_PREFIX = 'REPO#';
 const CRON_SK_PREFIX = 'CRON#';
 
