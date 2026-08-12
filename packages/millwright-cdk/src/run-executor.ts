@@ -91,6 +91,7 @@ export class RunExecutor extends Construct {
         STATE_TABLE_NAME: props.stateTable.tableName,
         ARTIFACT_BUCKET_NAME: props.artifactBucket.bucketName,
         BUILD_PROJECT_NAME: this.buildProjectName,
+        DEPLOYMENT_NAME: name,
         METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),
       },
       bundling: {

@@ -51,6 +51,7 @@ describe('run executor wiring (C5–C7)', () => {
       Environment: {
         Variables: Match.objectLike({
           BUILD_PROJECT_NAME: 'ci-builds',
+          DEPLOYMENT_NAME: 'ci',
           METADATA_RETENTION_DAYS: '90',
         }),
       },

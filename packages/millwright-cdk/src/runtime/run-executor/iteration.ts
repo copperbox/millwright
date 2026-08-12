@@ -54,6 +54,13 @@ export interface DispatchContext {
   readonly runId: string;
   readonly sha: string;
   readonly ref: string;
+  /**
+   * The job's stable role variant (spec §10.2), passed as
+   * `serviceRoleOverride`. Unset until the IAM issue's variant selection
+   * (secretsAllowedRefs match at dispatch) lands; the project default role
+   * carries the build meanwhile.
+   */
+  readonly serviceRoleArn?: string;
 }
 
 export interface DeciderStore {
