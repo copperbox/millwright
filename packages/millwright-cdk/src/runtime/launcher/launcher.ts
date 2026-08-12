@@ -136,6 +136,22 @@ export type Disposition =
 
 const GROUP_CLAIM_ATTEMPTS = 5;
 
+/**
+ * The dedupe-identity qualifier: cron events key on the fired minute; rerun
+ * events on the CLI's per-invocation nonce, so redeliveries coalesce while
+ * every new command starts a fresh run.
+ */
+function identityQualifier(event: ValidBusEvent): string | undefined {
+  switch (event.kind) {
+    case 'cron':
+      return event.minute;
+    case 'rerun':
+      return event.nonce;
+    default:
+      return undefined;
+  }
+}
+
 export async function processBusEvent(
   deps: LauncherDeps,
   envelope: BusEventEnvelope,
@@ -152,10 +168,7 @@ export async function processBusEvent(
     ref: event.ref,
     sha: event.sha,
     kind: event.kind,
-    // cron: the fired minute; rerun: the CLI's per-invocation nonce, so
-    // redeliveries coalesce while every new command starts a fresh run.
-    qualifier:
-      event.kind === 'cron' ? event.minute : event.kind === 'rerun' ? event.nonce : undefined,
+    qualifier: identityQualifier(event),
   };
 
   // 2. Dedupe / processing record.

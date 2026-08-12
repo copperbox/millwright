@@ -118,13 +118,17 @@ function triggerMatches(trigger: NarrowedTrigger, event: ValidBusEvent): boolean
   }
 }
 
+/** The registry's workflow map, narrowed from its unknown stored shape. */
+function registryWorkflows(registry: RegistryItem): Record<string, unknown> {
+  return typeof registry.workflows === 'object' && registry.workflows !== null
+    ? registry.workflows
+    : {};
+}
+
 export function matchWorkflows(registry: RegistryItem, event: ValidBusEvent): MatchResult {
   const matched: MatchedWorkflow[] = [];
   const malformed: string[] = [];
-  const workflows =
-    typeof registry.workflows === 'object' && registry.workflows !== null
-      ? registry.workflows
-      : {};
+  const workflows = registryWorkflows(registry);
   for (const name of Object.keys(workflows).sort()) {
     // cron and dispatch events target one named workflow.
     if ((event.kind === 'cron' || event.kind === 'dispatch') && event.workflow !== name) {
@@ -154,11 +158,7 @@ export function workflowConcurrency(
   registry: RegistryItem,
   workflow: string,
 ): MatchedWorkflow['concurrency'] | null | undefined {
-  const workflows =
-    typeof registry.workflows === 'object' && registry.workflows !== null
-      ? registry.workflows
-      : {};
-  const entry = workflows[workflow];
+  const entry = registryWorkflows(registry)[workflow];
   if (entry === undefined) {
     return undefined;
   }
