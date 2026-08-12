@@ -40,7 +40,14 @@ npm publish --workspaces
 ```sh
 npx @copperbox/millwright-cli init   # scaffold the two-file CDK app
 npm install && npx cdk deploy        # deploy the control plane
+millwright setup                     # create the GitHub App, pin host keys
+millwright repo add acme/api         # onboard a repo end to end
 ```
+
+`setup` creates the per-deployment GitHub App via the manifest flow (or takes
+a fine-grained PAT with `--pat`); `repo add` writes the repo's config, mints
+and installs a read-only deploy key, verifies it over SSH, and primes the
+registry. See the [CLI README](packages/millwright-cli) for details.
 
 The deployed construct self-registers a manifest at
 `/millwright/<name>/manifest`; the CLI discovers it with zero configuration

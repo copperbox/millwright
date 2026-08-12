@@ -170,10 +170,11 @@ async function installDeployKey(
       }
       deps.output(`GitHub refused the deploy-key install (${err.status}); falling back to manual add.`);
     }
-  } else {
+  } else if (credentials.mode === 'app') {
+    // mintRepoToken only returns undefined in App mode (no installation).
     deps.output(
-      `The GitHub App is not installed on ${repo} — install it (github.com/apps/` +
-        `${credentials.mode === 'app' ? credentials.slug : ''}/installations/new) to automate this, ` +
+      `The GitHub App is not installed on ${repo} — install it ` +
+        `(github.com/apps/${credentials.slug}/installations/new) to automate this, ` +
         'or add the key manually.',
     );
   }
