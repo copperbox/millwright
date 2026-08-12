@@ -162,7 +162,7 @@ export async function runTick(deps: PollerDeps): Promise<TickSummary> {
       deps.log('circuit breaker open, next probe pending — holding', { breaker });
     }
     const summary: TickSummary = { plan: plan.mode, outcomes: [], breaker, eventsEmitted: 0 };
-    emitTickMetrics(deps, summary, startedAt, new RotationFlow(deps, { pins: [] }));
+    emitTickMetrics(deps, summary, startedAt, false);
     return summary;
   }
 
@@ -205,7 +205,7 @@ export async function runTick(deps: PollerDeps): Promise<TickSummary> {
     breaker: nextBreaker,
     eventsEmitted: outcomes.reduce((sum, o) => sum + o.eventsEmitted, 0),
   };
-  emitTickMetrics(deps, summary, startedAt, rotation);
+  emitTickMetrics(deps, summary, startedAt, rotation.reconciled);
   deps.log('tick complete', {
     plan: plan.mode,
     repos: targets.length,
@@ -349,7 +349,7 @@ function emitTickMetrics(
   deps: PollerDeps,
   summary: TickSummary,
   startedAt: number,
-  rotation: RotationFlow,
+  rotationReconciled: boolean,
 ): void {
   const count = (status: RepoPollStatus) =>
     summary.outcomes.filter((o) => o.status === status).length;
@@ -360,7 +360,7 @@ function emitTickMetrics(
     TransportFailures: count('transport-failure'),
     QuarantinedRepos: count('quarantined') + count('quarantine-skipped'),
     CircuitBreakerOpen: summary.breaker.state === 'open' ? 1 : 0,
-    HostKeyRotationReconciled: rotation.reconciled ? 1 : 0,
+    HostKeyRotationReconciled: rotationReconciled ? 1 : 0,
     HostKeyHardFailures: count('host-key-failed'),
   });
 }

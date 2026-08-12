@@ -61,7 +61,7 @@ export class SsmConfigPlane implements ConfigPlane {
         }),
       );
       for (const parameter of page.Parameters ?? []) {
-        const repo = repoFromConfigParameter(this.reposPath, parameter.Name);
+        const repo = repoFromParameter(this.reposPath, parameter.Name, 'config');
         if (repo) {
           repos.push(repo);
         }
@@ -88,7 +88,7 @@ export class SsmConfigPlane implements ConfigPlane {
         }),
       );
       for (const parameter of result.Parameters ?? []) {
-        const repo = repoFromDeployKeyParameter(this.reposPath, parameter.Name);
+        const repo = repoFromParameter(this.reposPath, parameter.Name, 'deploy-key');
         if (repo && parameter.Value) {
           this.deployKeys.set(repo, parameter.Value);
         }
@@ -124,21 +124,16 @@ export class SsmConfigPlane implements ConfigPlane {
   }
 }
 
-function repoFromConfigParameter(reposPath: string, name: string | undefined): string | undefined {
-  if (!name?.startsWith(`${reposPath}/`) || !name.endsWith('/config')) {
-    return undefined;
-  }
-  const repo = name.slice(reposPath.length + 1, -'/config'.length);
-  return /^[^/]+\/[^/]+$/.test(repo) ? repo : undefined;
-}
-
-function repoFromDeployKeyParameter(
+/** `<reposPath>/<owner>/<repo>/<leaf>` → `owner/repo`, else undefined. */
+function repoFromParameter(
   reposPath: string,
   name: string | undefined,
+  leaf: 'config' | 'deploy-key',
 ): string | undefined {
-  if (!name?.startsWith(`${reposPath}/`) || !name.endsWith('/deploy-key')) {
+  const suffix = `/${leaf}`;
+  if (!name?.startsWith(`${reposPath}/`) || !name.endsWith(suffix)) {
     return undefined;
   }
-  const repo = name.slice(reposPath.length + 1, -'/deploy-key'.length);
+  const repo = name.slice(reposPath.length + 1, -suffix.length);
   return /^[^/]+\/[^/]+$/.test(repo) ? repo : undefined;
 }
