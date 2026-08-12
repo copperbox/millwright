@@ -1,23 +1,62 @@
+import { CloudWatchLogsClient } from '@aws-sdk/client-cloudwatch-logs';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { ECRClient } from '@aws-sdk/client-ecr';
 import { EventBridgeClient } from '@aws-sdk/client-eventbridge';
+import { IAMClient } from '@aws-sdk/client-iam';
+import { ServiceQuotasClient } from '@aws-sdk/client-service-quotas';
 import { SSMClient } from '@aws-sdk/client-ssm';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import {
   GithubCredentialsFormatError,
+  KeyFormatError,
   RepoConfigFormatError,
 } from '@copperbox/millwright-state';
 import { Command } from 'commander';
 import { CommandError } from './config-plane';
-import { DEPLOYMENT_ENV_VAR, DiscoveryError, discoverDeployment } from './discovery';
+import { DEPLOYMENT_ENV_VAR, DiscoveryError } from './discovery';
+import { DoctorDeps, doctor } from './doctor';
 import { GitProtocolError } from './git/ls-refs';
 import { HostKeyMismatchError } from './git/ssh';
 import { GithubApiError } from './github/rest';
 import { init } from './init';
+import { LogsDeps, logs } from './logs';
 import { promptSecret, waitForOperator } from './prompts';
 import { RepoDeps, repoAdd, repoList, repoRemove, repoUpdate } from './repo';
-import { SetupDeps, setup } from './setup';
+import { RunsDeps, runsList, runsShow } from './runs';
+import { secretsSet } from './secrets';
+import { SetupDeps, refreshHostKeys, setup } from './setup';
 import { VERSION } from './version';
 
 function output(line: string): void {
   process.stdout.write(`${line}\n`);
+}
+
+function docClient(): DynamoDBDocumentClient {
+  return DynamoDBDocumentClient.from(new DynamoDBClient({}));
+}
+
+function awsRegion(): string | undefined {
+  return process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
+}
+
+function runsDeps(): RunsDeps {
+  return { ssm: new SSMClient({}), ddb: docClient(), output, region: awsRegion() };
+}
+
+function logsDeps(): LogsDeps {
+  return { ssm: new SSMClient({}), ddb: docClient(), cwl: new CloudWatchLogsClient({}), output };
+}
+
+function doctorDeps(): DoctorDeps {
+  return {
+    ssm: new SSMClient({}),
+    ddb: docClient(),
+    iam: new IAMClient({}),
+    quotas: new ServiceQuotasClient({}),
+    ecr: new ECRClient({}),
+    fetchLike: fetch,
+    output,
+  };
 }
 
 function setupDeps(): SetupDeps {
@@ -184,16 +223,78 @@ export function buildProgram(): Command {
 
   program
     .command('doctor')
-    .description('verify the deployment chain (v0: SSM manifest discovery)')
+    .description(
+      'verify the chain: manifest, App creds (incl. per-repo pulls probe), deploy keys, ' +
+        'poller health, registry priming, quotas, ECR policies, rulesets',
+    )
     .action(async () => {
-      const deployment = await discoverDeployment(new SSMClient({}), {
-        explicitName: program.opts().deployment,
-      });
-      process.stdout.write(
-        `OK: deployment "${deployment.name}" (${deployment.manifestParameterName})\n` +
-          `    control plane v${deployment.manifest.version}, ` +
-          `run-model schema <= ${deployment.manifest.schemaVersion}\n` +
-          'Further checks (App credentials, deploy keys, poller health) land with those components.\n',
+      const report = await doctor(doctorDeps(), { explicitName: program.opts().deployment });
+      if (report.failed > 0) {
+        throw new CommandError(
+          `${report.failed} check${report.failed === 1 ? '' : 's'} failed — see the [FAIL] lines above`,
+        );
+      }
+    });
+
+  const runs = program.command('runs').description('inspect runs recorded in the state table');
+
+  runs
+    .command('list')
+    .description('list recent runs, newest first')
+    .option('--workflow <wf>', 'only this workflow (name or owner/repo/name)')
+    .option('--ref <ref>', 'only runs of this ref (short or full form)')
+    .option('--status <s>', 'only runs with this status (e.g. RUNNING, FAILED)')
+    .option('--limit <n>', 'rows to show', (value) => Number.parseInt(value, 10), 20)
+    .action(async (options: { workflow?: string; ref?: string; status?: string; limit: number }) => {
+      await runsList(runsDeps(), { ...options, explicitName: program.opts().deployment });
+    });
+
+  runs
+    .command('show')
+    .description('show one run — jobs, steps, checks; defaults to the latest run')
+    .argument('[run]', 'run id like ci#142 (or owner/repo/ci#142); omit for the latest')
+    .action(async (run: string | undefined) => {
+      await runsShow(runsDeps(), { run, explicitName: program.opts().deployment });
+    });
+
+  program
+    .command('logs')
+    .description("print or tail a run's job logs from CloudWatch")
+    .argument('[run]', 'run id like ci#142; omit for the latest run')
+    .option('-f, --follow', 'tail via polled GetLogEvents (~2 s cadence)')
+    .option('--job <name>', 'only this job')
+    .option('--failed', 'only failed jobs')
+    .option('--full', 'dump each stream from the beginning')
+    .action(
+      async (
+        run: string | undefined,
+        options: { follow?: boolean; job?: string; failed?: boolean; full?: boolean },
+      ) => {
+        await logs(logsDeps(), { run, ...options, explicitName: program.opts().deployment });
+      },
+    );
+
+  program
+    .command('refresh-host-keys')
+    .description("re-pin GitHub's SSH host keys from /meta (manual hatch for rotations)")
+    .action(async () => {
+      await refreshHostKeys(
+        { ssm: new SSMClient({}), fetchLike: fetch, output },
+        { explicitName: program.opts().deployment },
+      );
+    });
+
+  const secrets = program.command('secrets').description('manage workflow secrets');
+
+  secrets
+    .command('set')
+    .description('write one workflow secret (value prompted, never echoed)')
+    .argument('<name>', 'secret name, surfaced to jobs as an environment variable')
+    .option('--scope <scope>', 'secret scope; defaults to the repo of the cwd origin remote')
+    .action(async (name: string, options: { scope?: string }) => {
+      await secretsSet(
+        { ssm: new SSMClient({}), output, promptSecret },
+        { name, scope: options.scope, explicitName: program.opts().deployment },
       );
     });
 
@@ -208,6 +309,7 @@ const USER_FACING_ERRORS = [
   GitProtocolError,
   RepoConfigFormatError,
   GithubCredentialsFormatError,
+  KeyFormatError,
 ];
 
 export async function main(argv: readonly string[]): Promise<number> {

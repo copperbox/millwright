@@ -9,8 +9,60 @@ export {
 } from './discovery';
 export { InitOptions, InitResult, init } from './init';
 export { buildProgram, main } from './cli';
-export { CommandError, configKeyId, eventBusName } from './config-plane';
-export { SetupDeps, SetupOptions, hostKeysParameterValue, setup } from './setup';
+export {
+  CommandError,
+  configKeyId,
+  eventBusName,
+  manifestResource,
+  requireManifestResource,
+} from './config-plane';
+export {
+  SetupDeps,
+  SetupOptions,
+  hostKeysParameterValue,
+  refreshHostKeys,
+  setup,
+} from './setup';
+export {
+  DynamoDocClientLike,
+  RunDetail,
+  getPollingItem,
+  getRegistryEntry,
+  getRun,
+  listCheckStates,
+  listRegistryEntries,
+  listRunDetail,
+  queryNewestRuns,
+} from './state-reads';
+export {
+  RunRef,
+  StateReadContext,
+  WorkflowCoordinates,
+  discoverWorkflows,
+  formatQualifiedRunId,
+  formatRunId,
+  parseRunRef,
+  resolveRun,
+  resolveWorkflow,
+} from './run-ref';
+export {
+  RunsDeps,
+  RunsListOptions,
+  RunsShowOptions,
+  cloudWatchLogLink,
+  runsList,
+  runsShow,
+} from './runs';
+export { CloudWatchLogsClientLike, LogsDeps, LogsOptions, logs } from './logs';
+export {
+  AwsClientLike,
+  CheckStatus,
+  DoctorCheck,
+  DoctorDeps,
+  DoctorReport,
+  doctor,
+} from './doctor';
+export { SecretsDeps, SecretsSetOptions, parseGithubRemote, secretsSet } from './secrets';
 export {
   EventBridgeClientLike,
   RepoAddOptions,
