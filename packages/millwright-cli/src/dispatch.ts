@@ -101,12 +101,12 @@ interface ResolvedRef {
  * `refs/heads/` then `refs/tags/` for a short name) pin the target sha.
  */
 async function resolveRef(runGit: GitRunner, refOption: string | undefined): Promise<ResolvedRef> {
-  const candidates =
-    refOption === undefined
-      ? []
-      : refOption.startsWith('refs/')
-        ? [refOption]
-        : [`${BRANCH_REF_PREFIX}${refOption}`, `refs/tags/${refOption}`];
+  let candidates: string[] = [];
+  if (refOption !== undefined) {
+    candidates = refOption.startsWith('refs/')
+      ? [refOption]
+      : [`${BRANCH_REF_PREFIX}${refOption}`, `refs/tags/${refOption}`];
+  }
   const output = await runGit(['ls-remote', '--symref', 'origin', 'HEAD', ...candidates]);
 
   let defaultBranch: string | undefined;
@@ -297,7 +297,11 @@ export async function dispatch(options: DispatchOptions, deps: DispatchDeps): Pr
 
   let inputs: Record<string, DispatchInputValue> | undefined;
   if (registry) {
-    inputs = typeInputs(rawInputs, manualInputDeclarations(registry, workflow, registry.ref), workflow);
+    inputs = typeInputs(
+      rawInputs,
+      manualInputDeclarations(registry, workflow, registry.ref),
+      workflow,
+    );
   } else if (Object.keys(rawInputs).length > 0) {
     throw new DispatchError(
       `no registry entry for ${repo}@${resolved.ref} (or its default branch) — ` +

@@ -11,6 +11,8 @@
 
 export const MINUTE_MS = 60_000;
 
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
 export class CronParseError extends Error {}
 
 export interface CronExpression {
@@ -68,8 +70,14 @@ function parseField(spec: FieldSpec, field: string): { values: number[]; restric
         throw new CronParseError(`invalid ${spec.name} field "${field}"`);
       }
       from = Number(bounds[0]);
-      // A bare value with a step (`5/15`) means "from 5 to the max".
-      to = bounds.length === 2 ? Number(bounds[1]) : stepPart !== undefined ? spec.max : from;
+      if (bounds.length === 2) {
+        to = Number(bounds[1]);
+      } else if (stepPart !== undefined) {
+        // A bare value with a step (`5/15`) means "from 5 to the max".
+        to = spec.max;
+      } else {
+        to = from;
+      }
       if (from > to) {
         throw new CronParseError(`inverted range in ${spec.name} field "${field}"`);
       }
@@ -146,15 +154,13 @@ export function latestMatchingMinute(
   const lower = minuteFloor(afterMs); // exclusive
   const hoursDesc = [...expr.hours].reverse();
   const minutesDesc = [...expr.minutes].reverse();
-  for (
-    let day = Date.UTC(
-      new Date(upper).getUTCFullYear(),
-      new Date(upper).getUTCMonth(),
-      new Date(upper).getUTCDate(),
-    );
-    day + 24 * 60 * MINUTE_MS > lower + MINUTE_MS;
-    day -= 24 * 60 * MINUTE_MS
-  ) {
+  const upperDate = new Date(upper);
+  const upperDayStart = Date.UTC(
+    upperDate.getUTCFullYear(),
+    upperDate.getUTCMonth(),
+    upperDate.getUTCDate(),
+  );
+  for (let day = upperDayStart; day + DAY_MS > lower + MINUTE_MS; day -= DAY_MS) {
     if (!dayMatches(expr, new Date(day))) {
       continue;
     }

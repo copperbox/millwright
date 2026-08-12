@@ -184,8 +184,8 @@ export class DynamoPollingStore implements PollingStore, PrPollingStore {
 
   /**
    * `last-fired-minute` bookkeeping for one cron entry (spec §6.4). Malformed
-   * items read as absent: the cron pass then re-baselines to the current
-   * minute, which can never re-fire a backlog.
+   * items read as absent: the cron pass then re-baselines so only the current
+   * minute can fire, never a backlog.
    */
   async getCronLastFired(
     repo: string,
