@@ -4,7 +4,22 @@ Polling-driven CI/CD that runs in your own AWS account. GitHub stays the
 source of truth for code and collaboration; millwright replaces GitHub Actions
 *execution* — no webhooks, no runners to babysit, as serverless as possible.
 
-Spec: [`docs/specs/1-millwright-v1-implementable-specification.md`](docs/specs/1-millwright-v1-implementable-specification.md)
+> **Early alpha — not production ready.** millwright has never been deployed
+> outside development. The packages are unreleased, the interfaces below are
+> expected to change without notice, and no upgrade path between versions is
+> maintained yet. Treat everything here as a design you can try, not a service
+> you can depend on. Bug reports from people who do try it are the most useful
+> thing right now.
+
+- **[Spec](docs/specs/1-millwright-v1-implementable-specification.md)** — the
+  implementable v1 specification the code is built against.
+- **[AWS cost analysis](docs/aws-cost-analysis.md)** — line-item estimate at 50
+  watched repos: a few dollars a month idle, roughly $80–130/mo at 100 runs/day,
+  dominated by CodeBuild minutes and CloudWatch Logs ingestion.
+
+Deeper guides are linked from the sections below:
+[deploying](docs/deployment.md) · [authoring workflows](docs/workflow-authoring.md)
+· [running locally](docs/local-execution.md) · [operating](docs/operations.md).
 
 ## Packages
 
@@ -38,7 +53,7 @@ npm publish --workspaces
 ## Getting started (operators)
 
 ```sh
-npx @copperbox/millwright-cli init   # scaffold the two-file CDK app
+npx @copperbox/millwright-cli init   # scaffold the CDK app
 npm install && npx cdk deploy        # deploy the control plane
 millwright setup                     # create the GitHub App, pin host keys
 millwright repo add acme/api         # onboard a repo end to end
@@ -53,6 +68,9 @@ The deployed construct self-registers a manifest at
 `/millwright/<name>/manifest`; the CLI discovers it with zero configuration
 when the account+region has exactly one deployment (otherwise set
 `MILLWRIGHT_DEPLOYMENT` or pass `--deployment`).
+
+**→ [Deployment guide](docs/deployment.md)** — prerequisites, the construct's
+props, the GitHub App and PAT paths, verifying a first run, and teardown.
 
 ## Defining workflows (watched repos)
 
@@ -74,6 +92,11 @@ export default app;
 `npx millwright synth` compiles the definition to the JSON run model — the
 contract between definition, cloud orchestration, and the local runner —
 printing synth-time errors and lints to stderr.
+
+**→ [Authoring workflows](docs/workflow-authoring.md)** — every trigger and job
+option, dependencies, artifacts, caching, and how secrets are gated.
+**→ [Running workflows locally](docs/local-execution.md)** — the local runner,
+what it reproduces faithfully, and where it deliberately differs from cloud.
 
 ## Cron and manual dispatch
 
@@ -123,3 +146,7 @@ millwright runs rerun <run> [--failed]  # new run from the stored job model — 
 `<run>` is `owner/name#workflow#number`, or `workflow#number` with
 `--repo <owner/name>`. `--failed` reruns only the failed jobs and their
 skipped dependents, reusing the source run's succeeded outputs.
+
+**→ [Operating a deployment](docs/operations.md)** — where the logs live, the
+run state model, a troubleshooting playbook, credential rotation, and the
+cost and capacity levers.
