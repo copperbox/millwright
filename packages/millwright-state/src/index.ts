@@ -72,6 +72,34 @@ export {
   StepStatus,
 } from './items';
 export {
+  BuildOutcome,
+  DeciderActions,
+  DeciderClock,
+  DeciderJobState,
+  EffectiveJobStatus,
+  JobMark,
+  STALE_DISPATCH_MS,
+  decide,
+  effectiveJobStatus,
+} from './decider';
+export {
+  DEFAULT_JOB_ATTEMPTS,
+  DEFAULT_RUN_DEADLINE_MINUTES,
+  MAX_RUN_DEADLINE_MINUTES,
+  RunModel,
+  RunModelCompute,
+  RunModelError,
+  RunModelJob,
+  RunModelStep,
+  RunModelWorkflow,
+  jobAttemptCap,
+  jobDependencies,
+  parseRunModel,
+  runDeadlineMinutes,
+  workflowFromModel,
+} from './run-model';
+export {
+  BUILD_MAPPING_TTL_SECONDS,
   DEFAULT_METADATA_RETENTION_DAYS,
   EVENT_DEDUPE_TTL_SECONDS,
   TTL_ATTRIBUTE,
