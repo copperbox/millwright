@@ -49,6 +49,21 @@ describe('permissionsBoundary', () => {
   });
 });
 
+/**
+ * Manifest values now embed deploy-time tokens (bucket name, key ARN), so the
+ * template renders them as Fn::Join. Flatten to parseable JSON by standing in
+ * "TOKEN" for each intrinsic.
+ */
+function parseManifestValue(value: unknown): Record<string, unknown> {
+  const text =
+    typeof value === 'string'
+      ? value
+      : (value as { 'Fn::Join': [string, unknown[]] })['Fn::Join'][1]
+          .map((part) => (typeof part === 'string' ? part : 'TOKEN'))
+          .join('');
+  return JSON.parse(text);
+}
+
 describe('manifest parameter', () => {
   it('self-registers the manifest at /millwright/<name>/manifest', () => {
     const { stack, millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
@@ -57,14 +72,22 @@ describe('manifest parameter', () => {
     template.resourceCountIs('AWS::SSM::Parameter', 1);
     const [param] = Object.values(template.findResources('AWS::SSM::Parameter'));
     expect(param.Properties.Name).toBe('/millwright/millwright/manifest');
-    const manifest = JSON.parse(param.Properties.Value);
+    const manifest = parseManifestValue(param.Properties.Value);
     expect(manifest).toEqual({
       deploymentName: 'millwright',
       version: VERSION,
       schemaVersion: SUPPORTED_SCHEMA_VERSION,
       pollCadenceSeconds: 60,
-      retention: { logDays: 30, metadataDays: 90 },
+      retention: { logDays: 30, metadataDays: 90, artifactDays: 90, cacheDays: 14 },
       permissionsBoundary: BOUNDARY_ARN,
+      resources: {
+        stateTable: 'millwright-state',
+        pollingTable: 'millwright-polling',
+        artifactBucket: 'TOKEN',
+        buildLogGroup: '/millwright/millwright/builds',
+        configKeyArn: 'TOKEN',
+        configKeyAlias: 'alias/millwright/millwright',
+      },
     });
   });
 
@@ -97,17 +120,26 @@ describe('defaults', () => {
     expect(millwright.pollCadence.toSeconds()).toBe(Duration.minutes(1).toSeconds());
     expect(millwright.logRetention.toDays()).toBe(30);
     expect(millwright.metadataRetention.toDays()).toBe(90);
+    expect(millwright.artifactRetention.toDays()).toBe(90);
+    expect(millwright.cacheRetention.toDays()).toBe(14);
   });
 
   it('honours overrides', () => {
     const { millwright } = stackWith({
       permissionsBoundary: BOUNDARY_ARN,
       pollCadence: Duration.minutes(5),
-      retention: { logs: Duration.days(7), metadata: Duration.days(30) },
+      retention: {
+        logs: Duration.days(7),
+        metadata: Duration.days(30),
+        artifacts: Duration.days(60),
+        cache: Duration.days(3),
+      },
     });
     expect(millwright.pollCadence.toMinutes()).toBe(5);
     expect(millwright.logRetention.toDays()).toBe(7);
     expect(millwright.metadataRetention.toDays()).toBe(30);
+    expect(millwright.artifactRetention.toDays()).toBe(60);
+    expect(millwright.cacheRetention.toDays()).toBe(3);
   });
 });
 

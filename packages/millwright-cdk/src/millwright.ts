@@ -1,8 +1,14 @@
+import { manifestParameterName } from '@copperbox/millwright-state';
 import { Annotations, Duration } from 'aws-cdk-lib';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { Boundary } from './boundary';
+import { DataStores } from './data-stores';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -12,6 +18,16 @@ export interface RetentionProps {
   readonly logs?: Duration;
   /** Run/job metadata retention (state table TTL). @default Duration.days(90) */
   readonly metadata?: Duration;
+  /**
+   * Run artifact retention: lifecycle expiry on the bucket's `runs/` prefix.
+   * @default the metadata retention — artifacts age out with their run rows
+   */
+  readonly artifacts?: Duration;
+  /**
+   * Dependency-cache retention: lifecycle expiry on the bucket's `cache/`
+   * prefix. @default Duration.days(14)
+   */
+  readonly cache?: Duration;
 }
 
 export interface MillwrightProps {
@@ -59,6 +75,20 @@ export class Millwright extends Construct {
   readonly logRetention: Duration;
   /** Effective metadata retention. */
   readonly metadataRetention: Duration;
+  /** Effective run-artifact retention. */
+  readonly artifactRetention: Duration;
+  /** Effective dependency-cache retention. */
+  readonly cacheRetention: Duration;
+  /** C9 — the single-table state store (Streams enabled, TTL on `expiresAt`). */
+  readonly stateTable: dynamodb.Table;
+  /** C10 — the polling table. */
+  readonly pollingTable: dynamodb.Table;
+  /** C12 — the artifact/cache bucket. */
+  readonly artifactBucket: s3.Bucket;
+  /** C14 — the CMK under which every config-plane SecureString is encrypted. */
+  readonly configKey: kms.Key;
+  /** C17 — the log group receiving one stream per build. */
+  readonly buildLogGroup: logs.LogGroup;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -108,10 +138,25 @@ export class Millwright extends Construct {
     this.pollCadence = props.pollCadence ?? Duration.minutes(1);
     this.logRetention = props.retention?.logs ?? Duration.days(30);
     this.metadataRetention = props.retention?.metadata ?? Duration.days(90);
+    this.artifactRetention = props.retention?.artifacts ?? this.metadataRetention;
+    this.cacheRetention = props.retention?.cache ?? Duration.days(14);
+
+    const stores = new DataStores(this, 'DataStores', {
+      deploymentName: this.deploymentName,
+      logRetention: this.logRetention,
+      artifactRetention: this.artifactRetention,
+      cacheRetention: this.cacheRetention,
+    });
+    this.stateTable = stores.stateTable;
+    this.pollingTable = stores.pollingTable;
+    this.artifactBucket = stores.artifactBucket;
+    this.configKey = stores.configKey;
+    this.buildLogGroup = stores.buildLogGroup;
 
     // Self-registered deployment manifest: the CLI lists /millwright/*/manifest
     // and auto-picks when exactly one deployment exists in the account+region.
-    this.manifestParameterName = `/millwright/${this.deploymentName}/manifest`;
+    // Physical resource names ride along so no consumer ever reconstructs them.
+    this.manifestParameterName = manifestParameterName(this.deploymentName);
     this.manifestParameter = new ssm.StringParameter(this, 'Manifest', {
       parameterName: this.manifestParameterName,
       description: `millwright deployment manifest (${this.deploymentName})`,
@@ -123,8 +168,18 @@ export class Millwright extends Construct {
         retention: {
           logDays: this.logRetention.toDays(),
           metadataDays: this.metadataRetention.toDays(),
+          artifactDays: this.artifactRetention.toDays(),
+          cacheDays: this.cacheRetention.toDays(),
         },
         permissionsBoundary: this.permissionsBoundaryArn ?? null,
+        resources: {
+          stateTable: stores.stateTableName,
+          pollingTable: stores.pollingTableName,
+          artifactBucket: this.artifactBucket.bucketName,
+          buildLogGroup: stores.buildLogGroupName,
+          configKeyArn: this.configKey.keyArn,
+          configKeyAlias: stores.configKeyAlias,
+        },
       }),
     });
   }
