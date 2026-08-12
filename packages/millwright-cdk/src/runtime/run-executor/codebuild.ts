@@ -1,6 +1,7 @@
 import type { CodeBuildClient } from '@aws-sdk/client-codebuild';
 import {
   BatchGetBuildsCommand,
+  type ComputeType,
   StartBuildCommand,
   StopBuildCommand,
 } from '@aws-sdk/client-codebuild';
@@ -40,7 +41,7 @@ export function toBuildOutcome(status: string | undefined): BuildOutcome {
 }
 
 /** Model compute size → CodeBuild compute type; small is the default (§7.4). */
-function computeTypeFor(size: RunModelCompute['size']): string {
+function computeTypeFor(size: RunModelCompute['size']): ComputeType {
   switch (size) {
     case 'large':
       return 'BUILD_GENERAL1_LARGE';
