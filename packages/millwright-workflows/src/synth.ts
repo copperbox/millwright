@@ -12,7 +12,6 @@ import { Diagnostic, SynthError } from './diagnostics';
 import {
   ArtifactModel,
   ArtifactRefModel,
-  CacheKeyPartModel,
   CacheModel,
   JobModel,
   ManualInputModel,
@@ -26,7 +25,7 @@ import { matchesAnyRefPattern } from './refs';
 import { SCHEMA_VERSION } from './schema';
 import { ManualInput, Trigger } from './trigger';
 import { validateRunModel } from './validate';
-import { Compute, Secret, StepInput } from './values';
+import { Cache, Compute, Secret, StepInput } from './values';
 import { Job, Workflow, WorkflowSet } from './workflow';
 
 export interface DispatchOptions {
@@ -57,6 +56,13 @@ export interface SynthOptions {
   readonly secretsAllowedRefs?: readonly string[];
   /** Present when synthesizing for a manual dispatch. */
   readonly dispatch?: DispatchOptions;
+  /**
+   * Evaluates `hashFiles(...)` cache-key parts against the checked-out
+   * source (spec §12: keys are resolved at synth, where the repo content
+   * is). The CLI always supplies one; a definition using `hashFiles` fails
+   * synth without it.
+   */
+  readonly resolveHashFiles?: (patterns: readonly string[]) => string;
 }
 
 export interface SynthResult {
@@ -83,10 +89,10 @@ function hasExplicitRegistry(image: string): boolean {
 function toSecretModel(secret: Secret): SecretModel {
   if (secret.kind === 'named') {
     return secret.scope !== undefined
-      ? { kind: 'named', name: secret.ref, scope: secret.scope }
-      : { kind: 'named', name: secret.ref };
+      ? { parameter: secret.ref, scope: secret.scope }
+      : { parameter: secret.ref };
   }
-  return { kind: 'secretsManager', arn: secret.ref };
+  return { secretsManager: secret.ref };
 }
 
 function toManualInputModel(input: ManualInput): ManualInputModel {
@@ -404,14 +410,14 @@ class Synthesizer {
       }
     }
 
-    const produces: Record<string, ArtifactModel> = {};
+    const produces: ArtifactModel[] = [];
     for (const [name, artifact] of Object.entries(props.produces ?? {})) {
-      produces[name] = { kind: artifact.kind, path: artifact.path };
+      produces.push({ name, paths: [artifact.path] });
     }
 
-    const consumes: Record<string, ArtifactRefModel> = {};
+    const consumes: ArtifactRefModel[] = [];
     for (const [name, ref] of Object.entries(props.consumes ?? {})) {
-      consumes[name] = { job: ref.job.name, artifact: ref.artifactName };
+      consumes.push({ job: ref.job.name, artifact: ref.artifactName });
       if (!workflow.jobs.includes(ref.job)) {
         this.error(
           'consumes-unmatched',
@@ -434,15 +440,7 @@ class Synthesizer {
       }
     }
 
-    let cache: CacheModel | undefined;
-    if (props.cache) {
-      const key: CacheKeyPartModel[] = props.cache.key.map((part) =>
-        typeof part === 'string'
-          ? { kind: 'literal', value: part }
-          : { kind: 'hashFiles', patterns: [...part.patterns] },
-      );
-      cache = { key, paths: [...props.cache.paths], restoreKeys: [...props.cache.restoreKeys] };
-    }
+    const cache = props.cache ? this.resolveCache(props.cache, where) : undefined;
 
     return {
       name: job.name,
@@ -451,11 +449,76 @@ class Synthesizer {
       privileged: props.privileged ?? false,
       ...(props.timeout !== undefined ? { timeoutMinutes: props.timeout.minutes } : {}),
       steps,
-      secrets,
-      produces,
-      consumes,
+      ...(Object.keys(secrets).length > 0 ? { secrets } : {}),
+      ...(produces.length > 0 ? { produces } : {}),
+      ...(consumes.length > 0 ? { consumes } : {}),
       dependsOn,
       ...(cache ? { cache } : {}),
+    };
+  }
+
+  /**
+   * Assemble the cache key: literal parts verbatim, `hashFiles(...)` parts
+   * through the resolver (spec §12 — resolution happens at synth, against
+   * the checked-out source). The resolved key is the S3 object name under
+   * `cache/<repo>/`, so it is linted the way the layout will enforce it.
+   */
+  private resolveCache(
+    cache: Cache,
+    where: { workflow: string; job: string },
+  ): CacheModel | undefined {
+    const parts: string[] = [];
+    for (const part of cache.key) {
+      if (typeof part === 'string') {
+        parts.push(part);
+        continue;
+      }
+      const resolver = this.options.resolveHashFiles;
+      if (!resolver) {
+        this.error(
+          'hash-files-unresolvable',
+          'cache key uses hashFiles() but no resolveHashFiles was supplied — hashing happens ' +
+            'at synth against the checked-out source (the millwright CLI always provides it)',
+          where,
+        );
+        return undefined;
+      }
+      parts.push(resolver(part.patterns));
+    }
+    const key = parts.join('');
+    if (!key) {
+      this.error(
+        'cache-key-empty',
+        'cache key resolved to an empty string — add a literal part so misses (hashFiles ' +
+          'matching no files) still produce a usable key',
+        where,
+      );
+      return undefined;
+    }
+    if (key.includes('..') || key.includes('/')) {
+      this.error(
+        'cache-key-invalid',
+        `cache key "${key}" must not contain "/" or ".." — it becomes one S3 object name ` +
+          'under cache/<repo>/',
+        where,
+      );
+      return undefined;
+    }
+    for (const restoreKey of cache.restoreKeys) {
+      if (!restoreKey || restoreKey.includes('..') || restoreKey.includes('/')) {
+        this.error(
+          'restore-key-invalid',
+          `restore key "${restoreKey}" must be non-empty and free of "/" and ".." — restore ` +
+            'keys are prefixes of cache keys',
+          where,
+        );
+        return undefined;
+      }
+    }
+    return {
+      key,
+      paths: [...cache.paths],
+      ...(cache.restoreKeys.length > 0 ? { restoreKeys: [...cache.restoreKeys] } : {}),
     };
   }
 

@@ -166,20 +166,34 @@ function checkSecret(c: Checker, secret: unknown, path: string): void {
   if (!c.isRecord(secret, path, 'secret')) {
     return;
   }
-  if (secret.kind === 'named') {
-    c.nonEmptyString(secret.name, `${path}.name`, 'secret name');
+  if ('parameter' in secret) {
+    c.nonEmptyString(secret.parameter, `${path}.parameter`, 'secret parameter name');
     if (secret.scope !== undefined) {
       c.nonEmptyString(secret.scope, `${path}.scope`, 'secret scope');
     }
-  } else if (secret.kind === 'secretsManager') {
+  } else if ('secretsManager' in secret) {
     if (
-      c.nonEmptyString(secret.arn, `${path}.arn`, 'secret ARN') &&
-      !secret.arn.startsWith('arn:')
+      c.nonEmptyString(secret.secretsManager, `${path}.secretsManager`, 'secret ARN') &&
+      !secret.secretsManager.startsWith('arn:')
     ) {
-      c.fail(`${path}.arn`, `"${secret.arn}" is not a Secrets Manager ARN`);
+      c.fail(`${path}.secretsManager`, `"${secret.secretsManager}" is not a Secrets Manager ARN`);
     }
   } else {
-    c.fail(`${path}.kind`, 'secret kind must be "named" or "secretsManager"');
+    c.fail(path, 'secret must carry "parameter" or "secretsManager"');
+  }
+}
+
+/**
+ * The key arrives fully resolved (spec §12: `hashFiles` is evaluated at
+ * synth) and becomes one S3 object name under `cache/<repo>/`; restore keys
+ * are prefixes of keys, so both get the same character discipline.
+ */
+function checkCacheKey(c: Checker, value: unknown, path: string, what: string): void {
+  if (!c.nonEmptyString(value, path, what)) {
+    return;
+  }
+  if (value.includes('..') || value.includes('/')) {
+    c.fail(path, `${what} "${value}" must not contain "/" or ".."`);
   }
 }
 
@@ -187,33 +201,15 @@ function checkCache(c: Checker, cache: unknown, path: string): void {
   if (!c.isRecord(cache, path, 'cache')) {
     return;
   }
-  if (c.isArray(cache.key, `${path}.key`, 'cache key')) {
-    if (cache.key.length === 0) {
-      c.fail(`${path}.key`, 'cache key needs at least one part');
-    }
-    cache.key.forEach((part, i) => {
-      const partPath = `${path}.key[${i}]`;
-      if (!c.isRecord(part, partPath, 'cache key part')) {
-        return;
-      }
-      if (part.kind === 'literal') {
-        c.nonEmptyString(part.value, `${partPath}.value`, 'literal key part');
-      } else if (part.kind === 'hashFiles') {
-        if (
-          c.stringArray(part.patterns, `${partPath}.patterns`, 'hashFiles patterns') &&
-          part.patterns.length === 0
-        ) {
-          c.fail(`${partPath}.patterns`, 'hashFiles needs at least one pattern');
-        }
-      } else {
-        c.fail(`${partPath}.kind`, 'cache key part kind must be "literal" or "hashFiles"');
-      }
-    });
-  }
+  checkCacheKey(c, cache.key, `${path}.key`, 'cache key');
   if (c.stringArray(cache.paths, `${path}.paths`, 'cache paths') && cache.paths.length === 0) {
     c.fail(`${path}.paths`, 'cache needs at least one path');
   }
-  c.stringArray(cache.restoreKeys ?? [], `${path}.restoreKeys`, 'restoreKeys');
+  if (cache.restoreKeys !== undefined && c.isArray(cache.restoreKeys, `${path}.restoreKeys`, 'restoreKeys')) {
+    cache.restoreKeys.forEach((key, i) => {
+      checkCacheKey(c, key, `${path}.restoreKeys[${i}]`, 'restore key');
+    });
+  }
 }
 
 function checkJob(c: Checker, job: Record<string, unknown>, path: string): void {
@@ -249,32 +245,42 @@ function checkJob(c: Checker, job: Record<string, unknown>, path: string): void 
       }
     });
   }
-  if (c.isRecord(job.secrets, `${path}.secrets`, 'secrets')) {
+  if (job.secrets !== undefined && c.isRecord(job.secrets, `${path}.secrets`, 'secrets')) {
     for (const [name, secret] of Object.entries(job.secrets)) {
       checkSecret(c, secret, `${path}.secrets.${name}`);
     }
   }
-  if (c.isRecord(job.produces, `${path}.produces`, 'produces')) {
-    for (const [name, artifact] of Object.entries(job.produces)) {
-      const artifactPath = `${path}.produces.${name}`;
+  if (job.produces !== undefined && c.isArray(job.produces, `${path}.produces`, 'produces')) {
+    const seen = new Set<string>();
+    job.produces.forEach((artifact, i) => {
+      const artifactPath = `${path}.produces[${i}]`;
       if (!c.isRecord(artifact, artifactPath, 'artifact')) {
-        continue;
+        return;
       }
-      if (artifact.kind !== 'dir' && artifact.kind !== 'file') {
-        c.fail(`${artifactPath}.kind`, 'artifact kind must be "dir" or "file"');
+      // The name becomes the `out/<job>/<name>/` prefix segment (§9.3).
+      if (c.validName(artifact.name, `${artifactPath}.name`, 'artifact name')) {
+        if (seen.has(artifact.name)) {
+          c.fail(`${artifactPath}.name`, `duplicate artifact name "${artifact.name}"`);
+        }
+        seen.add(artifact.name);
       }
-      c.nonEmptyString(artifact.path, `${artifactPath}.path`, 'artifact path');
-    }
+      if (
+        c.stringArray(artifact.paths, `${artifactPath}.paths`, 'artifact paths') &&
+        artifact.paths.length === 0
+      ) {
+        c.fail(`${artifactPath}.paths`, 'artifact needs at least one path');
+      }
+    });
   }
-  if (c.isRecord(job.consumes, `${path}.consumes`, 'consumes')) {
-    for (const [name, ref] of Object.entries(job.consumes)) {
-      const refPath = `${path}.consumes.${name}`;
+  if (job.consumes !== undefined && c.isArray(job.consumes, `${path}.consumes`, 'consumes')) {
+    job.consumes.forEach((ref, i) => {
+      const refPath = `${path}.consumes[${i}]`;
       if (!c.isRecord(ref, refPath, 'artifact reference')) {
-        continue;
+        return;
       }
       c.nonEmptyString(ref.job, `${refPath}.job`, 'producing job name');
       c.nonEmptyString(ref.artifact, `${refPath}.artifact`, 'artifact name');
-    }
+    });
   }
   c.stringArray(job.dependsOn, `${path}.dependsOn`, 'dependsOn');
   if (job.cache !== undefined) {
@@ -301,35 +307,37 @@ function checkWorkflowGraph(c: Checker, workflow: Record<string, unknown>, path:
       return;
     }
     const deps = new Set<string>();
-    const consumes = record.consumes;
-    if (typeof consumes === 'object' && consumes !== null) {
-      for (const [artifactName, refValue] of Object.entries(consumes)) {
+    if (Array.isArray(record.consumes)) {
+      record.consumes.forEach((refValue, r) => {
         const ref = refValue as Record<string, unknown>;
         const producerName = ref?.job;
         if (typeof producerName !== 'string') {
-          continue;
+          return;
         }
         const producer = jobByName.get(producerName);
-        const refPath = `${path}.jobs[${i}].consumes.${artifactName}`;
+        const refPath = `${path}.jobs[${i}].consumes[${r}]`;
         if (!producer) {
           c.fail(
             refPath,
             `consumes artifact "${ref.artifact}" from job "${producerName}", which is not a job ` +
               `in workflow "${workflow.name}" — consumes only reaches jobs in the same workflow`,
           );
-          continue;
+          return;
         }
-        const produces = producer.produces as Record<string, unknown> | undefined;
-        if (typeof ref.artifact !== 'string' || !produces?.[ref.artifact]) {
+        const produces = Array.isArray(producer.produces) ? producer.produces : [];
+        const produced = produces.some(
+          (artifact) => (artifact as Record<string, unknown>)?.name === ref.artifact,
+        );
+        if (typeof ref.artifact !== 'string' || !produced) {
           c.fail(
             refPath,
             `consumes artifact "${ref.artifact}" which job "${producerName}" does not produce — ` +
               'every consumes needs a matching produces',
           );
-          continue;
+          return;
         }
         deps.add(producerName);
-      }
+      });
     }
     if (Array.isArray(record.dependsOn)) {
       record.dependsOn.forEach((dep, d) => {

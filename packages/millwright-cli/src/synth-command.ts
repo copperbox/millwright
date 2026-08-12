@@ -10,6 +10,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DefinitionLoadError, loadDefinition } from './definition-loader';
+import { createHashFilesResolver } from './hash-files';
 
 export const DEFAULT_ENTRY = path.join('millwright', 'workflows.ts');
 
@@ -115,6 +116,8 @@ export function runSynthCommand(options: SynthCommandOptions = {}): number {
 
     const synthOptions: SynthOptions = {
       ...identity,
+      // Cache keys resolve at synth, against this checkout (spec §12).
+      resolveHashFiles: createHashFilesResolver(cwd),
       ...(options.ref !== undefined ? { ref: options.ref } : {}),
       ...(options.schemaCeiling !== undefined
         ? { controlPlaneSchemaVersion: options.schemaCeiling }

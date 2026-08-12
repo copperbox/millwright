@@ -17,7 +17,13 @@ import {
   WorkflowSet,
 } from '../src';
 
-const IDENTITY = { repo: 'copperbox/example', commit: 'deadbeef' };
+const IDENTITY: SynthOptions = {
+  repo: 'copperbox/example',
+  commit: 'deadbeef',
+  // Deterministic stand-in for the CLI's real resolver — hashing happens at
+  // synth against the checked-out source, which unit tests do not have.
+  resolveHashFiles: (patterns) => `h${patterns.length}`,
+};
 
 /** A definition exercising every construct the spec pins (§4.2). */
 function everyConstructSet(): WorkflowSet {
@@ -132,18 +138,15 @@ describe('synthesize — the happy path', () => {
     expect(build.privileged).toBe(false);
     expect(build.timeoutMinutes).toBeUndefined();
     expect(build.cache).toEqual({
-      key: [
-        { kind: 'literal', value: 'npm-' },
-        { kind: 'hashFiles', patterns: ['package-lock.json'] },
-      ],
+      key: 'npm-h1',
       paths: ['node_modules'],
       restoreKeys: ['npm-'],
     });
-    expect(build.produces).toEqual({
-      dist: { kind: 'dir', path: 'dist' },
-      report: { kind: 'file', path: 'coverage/report.xml' },
-    });
-    expect(ci.jobs[1].consumes).toEqual({ dist: { job: 'build', artifact: 'dist' } });
+    expect(build.produces).toEqual([
+      { name: 'dist', paths: ['dist'] },
+      { name: 'report', paths: ['coverage/report.xml'] },
+    ]);
+    expect(ci.jobs[1].consumes).toEqual([{ job: 'build', artifact: 'dist' }]);
     expect(ci.jobs.map((j) => j.name)).toContain('test-node20');
 
     const release = model.workflows[1];
@@ -157,11 +160,10 @@ describe('synthesize — the happy path', () => {
     expect(publish.privileged).toBe(true);
     expect(publish.timeoutMinutes).toBe(30);
     expect(publish.secrets).toEqual({
-      NPM_TOKEN: { kind: 'named', name: 'npm-token' },
-      SHARED: { kind: 'named', name: 'deploy-key', scope: 'platform' },
+      NPM_TOKEN: { parameter: 'npm-token' },
+      SHARED: { parameter: 'deploy-key', scope: 'platform' },
       DOCKERHUB: {
-        kind: 'secretsManager',
-        arn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/dockerhub',
+        secretsManager: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/dockerhub',
       },
     });
     expect(publish.steps[1]).toEqual({
@@ -348,6 +350,45 @@ describe('synthesize — errors', () => {
       synthesize(everyConstructSet(), { ...IDENTITY, controlPlaneSchemaVersion: SCHEMA_VERSION })
         .model.schemaVersion,
     ).toBe(SCHEMA_VERSION);
+  });
+
+  it('fails when hashFiles is used without a resolver — hashing happens at synth', () => {
+    const app = new WorkflowSet({ image: 'r.example.com/i:1' });
+    new Workflow(app, 'ci', { on: [Trigger.push()] }).job('build', {
+      cache: Cache.keyed({ key: ['npm-', hashFiles('package-lock.json')], paths: ['node_modules'] }),
+      steps: ['true'],
+    });
+    const errors = synthErrors(app, { repo: 'copperbox/example', commit: 'deadbeef' });
+    expect(errors).toMatchObject([{ code: 'hash-files-unresolvable', workflow: 'ci', job: 'build' }]);
+  });
+
+  it('fails on cache keys that resolve empty or carry S3-hostile characters', () => {
+    const cacheJob = (key: (string | ReturnType<typeof hashFiles>)[]): WorkflowSet => {
+      const app = new WorkflowSet({ image: 'r.example.com/i:1' });
+      new Workflow(app, 'ci', { on: [Trigger.push()] }).job('build', {
+        cache: Cache.keyed({ key, paths: ['node_modules'] }),
+        steps: ['true'],
+      });
+      return app;
+    };
+    // hashFiles matching nothing resolves to '' — an all-hash key vanishes.
+    expect(
+      synthErrors(cacheJob([hashFiles('no-such-file')]), {
+        ...IDENTITY,
+        resolveHashFiles: () => '',
+      }),
+    ).toMatchObject([{ code: 'cache-key-empty' }]);
+    expect(synthErrors(cacheJob(['npm/x']))).toMatchObject([{ code: 'cache-key-invalid' }]);
+    expect(synthErrors(cacheJob(['npm-..x']))).toMatchObject([{ code: 'cache-key-invalid' }]);
+  });
+
+  it('fails on restore keys with separator characters', () => {
+    const app = new WorkflowSet({ image: 'r.example.com/i:1' });
+    new Workflow(app, 'ci', { on: [Trigger.push()] }).job('build', {
+      cache: Cache.keyed({ key: ['npm-x'], paths: ['node_modules'], restoreKeys: ['npm/'] }),
+      steps: ['true'],
+    });
+    expect(synthErrors(app)).toMatchObject([{ code: 'restore-key-invalid' }]);
   });
 
   it('fails on malformed cron expressions', () => {

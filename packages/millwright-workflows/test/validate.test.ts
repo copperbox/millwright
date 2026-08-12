@@ -37,18 +37,14 @@ function validDocument(): Record<string, unknown> {
               privileged: false,
               steps: [{ run: 'npm ci' }, { run: 'npm publish', skipIf: 'already-published' }],
               secrets: {
-                NPM_TOKEN: { kind: 'named', name: 'npm-token' },
-                SHARED: { kind: 'named', name: 'key', scope: 'platform' },
-                HUB: { kind: 'secretsManager', arn: 'arn:aws:secretsmanager:x:y:secret:z' },
+                NPM_TOKEN: { parameter: 'npm-token' },
+                SHARED: { parameter: 'key', scope: 'platform' },
+                HUB: { secretsManager: 'arn:aws:secretsmanager:x:y:secret:z' },
               },
-              produces: { dist: { kind: 'dir', path: 'dist' } },
-              consumes: {},
+              produces: [{ name: 'dist', paths: ['dist'] }],
               dependsOn: [],
               cache: {
-                key: [
-                  { kind: 'literal', value: 'npm-' },
-                  { kind: 'hashFiles', patterns: ['package-lock.json'] },
-                ],
+                key: 'npm-abc123',
                 paths: ['node_modules'],
                 restoreKeys: ['npm-'],
               },
@@ -60,9 +56,7 @@ function validDocument(): Record<string, unknown> {
               privileged: true,
               timeoutMinutes: 30,
               steps: [{ run: 'npm run test:integration' }],
-              secrets: {},
-              produces: {},
-              consumes: { dist: { job: 'build', artifact: 'dist' } },
+              consumes: [{ job: 'build', artifact: 'dist' }],
               dependsOn: ['build'],
             },
           ],
@@ -162,31 +156,40 @@ describe('validateRunModel', () => {
     expect(issuesOf((d) => (job(d).steps = []))[0]).toContain('at least one step');
     expect(issuesOf((d) => ((job(d).steps as Job[])[0].run = ''))[0]).toContain('step command');
     expect(issuesOf((d) => ((job(d).secrets as Job).NPM_TOKEN = { kind: 'env' }))[0]).toContain(
-      '"named" or "secretsManager"',
+      '"parameter" or "secretsManager"',
     );
     expect(
-      issuesOf((d) => ((job(d).secrets as Job).HUB = { kind: 'secretsManager', arn: 'nope' }))[0],
+      issuesOf((d) => ((job(d).secrets as Job).HUB = { secretsManager: 'nope' }))[0],
     ).toContain('not a Secrets Manager ARN');
     expect(
-      issuesOf((d) => ((job(d).produces as Job).dist = { kind: 'blob', path: 'x' }))[0],
-    ).toContain('"dir" or "file"');
-    expect(issuesOf((d) => ((job(d).cache as Job).paths = []))[0]).toContain('at least one path');
+      issuesOf((d) => ((job(d).produces as Job[])[0] = { name: 'out/../up', paths: ['x'] }))[0],
+    ).toContain('artifact name');
     expect(
-      issuesOf((d) => (((job(d).cache as Job).key as Job[])[1] = { kind: 'hash' }))[0],
-    ).toContain('"literal" or "hashFiles"');
+      issuesOf((d) => ((job(d).produces as Job[])[1] = { name: 'dist', paths: ['x'] }))[0],
+    ).toContain('duplicate artifact name');
+    expect(
+      issuesOf((d) => ((job(d).produces as Job[])[0] = { name: 'dist', paths: [] }))[0],
+    ).toContain('at least one path');
+    expect(issuesOf((d) => ((job(d).cache as Job).paths = []))[0]).toContain('at least one path');
+    expect(issuesOf((d) => ((job(d).cache as Job).key = 'npm/../x'))[0]).toContain(
+      'must not contain "/" or ".."',
+    );
+    expect(issuesOf((d) => ((job(d).cache as Job).restoreKeys = ['ok-', '../nope']))[0]).toContain(
+      'restore key',
+    );
   });
 
   it('rejects consumes without a matching produces', () => {
     // Producer job exists but does not produce the artifact.
     expect(
       issuesOf((d) => {
-        (job(d, 1).consumes as Job).dist = { job: 'build', artifact: 'missing' };
+        (job(d, 1).consumes as Job[])[0] = { job: 'build', artifact: 'missing' };
       })[0],
     ).toContain('every consumes needs a matching produces');
     // Producer job does not exist at all.
     expect(
       issuesOf((d) => {
-        (job(d, 1).consumes as Job).dist = { job: 'ghost', artifact: 'dist' };
+        (job(d, 1).consumes as Job[])[0] = { job: 'ghost', artifact: 'dist' };
       })[0],
     ).toContain('not a job in workflow "ci"');
   });

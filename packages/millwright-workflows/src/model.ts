@@ -79,9 +79,10 @@ export interface JobModel {
   readonly privileged: boolean;
   readonly timeoutMinutes?: number;
   readonly steps: readonly StepModel[];
-  readonly secrets: Readonly<Record<string, SecretModel>>;
-  readonly produces: Readonly<Record<string, ArtifactModel>>;
-  readonly consumes: Readonly<Record<string, ArtifactRefModel>>;
+  /** Secret references keyed by the env var each lands in; omitted when none. */
+  readonly secrets?: Readonly<Record<string, SecretModel>>;
+  readonly produces?: readonly ArtifactModel[];
+  readonly consumes?: readonly ArtifactRefModel[];
   /** Explicit artifact-less ordering; `consumes` edges are additional implicit dependencies. */
   readonly dependsOn: readonly string[];
   readonly cache?: CacheModel;
@@ -98,13 +99,21 @@ export interface StepModel {
   readonly skipIf?: string;
 }
 
+/**
+ * One secret reference — the wire shape the decider and buildspec renderer
+ * consume. `Secret.named` emits a parameter reference (scope defaults to the
+ * run's repo downstream); `Secret.fromSecretsManager` a passthrough ARN.
+ * Which refs actually receive grants is decided at dispatch (§12a) — nothing
+ * here is trusted beyond naming what the job would like.
+ */
 export type SecretModel =
-  | { readonly kind: 'named'; readonly name: string; readonly scope?: string }
-  | { readonly kind: 'secretsManager'; readonly arn: string };
+  | { readonly parameter: string; readonly scope?: string }
+  | { readonly secretsManager: string };
 
+/** One declared artifact: uploaded to `out/<job>/<name>/` after the steps. */
 export interface ArtifactModel {
-  readonly kind: 'dir' | 'file';
-  readonly path: string;
+  readonly name: string;
+  readonly paths: readonly string[];
 }
 
 /** Consumption edge: names the producing job and its declared artifact. */
@@ -113,12 +122,14 @@ export interface ArtifactRefModel {
   readonly artifact: string;
 }
 
+/**
+ * Keyed dependency cache (spec §12): GHA-style semantics. `key` is emitted
+ * fully resolved — `hashFiles(...)` is evaluated at synth, where the checked-
+ * out source is — and `restoreKeys` are prefix fallbacks tried in order on an
+ * exact-key miss. An exact hit skips the save phase.
+ */
 export interface CacheModel {
-  readonly key: readonly CacheKeyPartModel[];
+  readonly key: string;
   readonly paths: readonly string[];
-  readonly restoreKeys: readonly string[];
+  readonly restoreKeys?: readonly string[];
 }
-
-export type CacheKeyPartModel =
-  | { readonly kind: 'literal'; readonly value: string }
-  | { readonly kind: 'hashFiles'; readonly patterns: readonly string[] };

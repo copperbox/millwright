@@ -17,7 +17,6 @@ export {
   ArtifactModel,
   ArtifactRefModel,
   CacheModel,
-  CacheKeyPartModel,
 } from './model';
 export { Diagnostic, SynthError, formatDiagnostic } from './diagnostics';
 export { synthesize, SynthOptions, SynthResult, DispatchOptions } from './synth';
