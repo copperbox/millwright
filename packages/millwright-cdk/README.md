@@ -47,6 +47,30 @@ only then writes `REG#<repo>` / `REF#<ref>` — plus the `<workflow> / synth`
 (or, for bootstrap synth-only executions, `millwright / synth`) check
 desired state.
 
+## The shim data plane (spec §12, §11.2)
+
+Job images carry "Linux + POSIX shell, nothing more", so all data-plane work
+runs through the delivered shim binary. `src/runtime/shim/` implements the
+subcommands the shared buildspec renderer authors:
+
+- `source unpack` — extracts `source.tar.gz` (jobs never clone) with a
+  dependency-free tar reader; path traversal in an archive is refused.
+- `artifact upload` / `artifact fetch` — objects under
+  `out/<job>/<artifact>/<workspace-relative-path>`. Upload derives its
+  destination from the job's own dispatch identity (`MILLWRIGHT_JOB`); no
+  invocation can name another job's subtree, and the job role's IAM policy
+  (spec §10.2) enforces the same boundary underneath. Fetch may read any
+  producer — run-wide artifact read is deliberate. Loose artifact objects do
+  not carry file modes (v1 limit); caches, which travel as tar.gz, do.
+- `cache restore` / `cache save` — exact key first, then `restoreKeys`
+  prefixes in order (newest object wins); an exact hit drops a marker that
+  makes the post-build save a no-op, and save also skips when the key
+  already exists (cache write trust is repo-scoped — first writer wins).
+
+The `MILLWRIGHT_OUT_URI`/`MILLWRIGHT_CACHE_URI` env vars carry `s3://` URIs
+in the cloud and plain directory paths under the local runner; the commands
+are identical in both.
+
 Pinned physical names this construct honors or introduces:
 
 | Name | What |
