@@ -60,9 +60,37 @@ reconciliation path. Long runs carry over to a fresh execution of the same
 machine before the Step Functions history ceiling, resuming from table state.
 
 Still owned by later issues: the concurrency-group hand-off on run completion
-(spec §8.4), check desired-state writes (§13.2), job-role variant selection
-at dispatch (§10.2), and the shared buildspec renderer (§7.4) — the decider
-currently dispatches with an interim plain-steps buildspec.
+(spec §8.4), check desired-state writes (§13.2), and job-role variant
+selection at dispatch (§10.2). Dispatch renders every job's buildspec through
+the shared control-plane renderer (§7.4) from `@copperbox/millwright-state`.
+
+## Step shim and step events (C13, C19)
+
+Every step of every job runs wrapped by the **step shim**, delivered from the
+artifact bucket's `control/shim/` prefix — attached to each build as its S3
+secondary source, bind-mounted by the local runner. The delivered entry,
+`millwright-shim`, is a POSIX-sh dispatcher (invoked through `sh`, since S3
+materialization strips execute bits) that execs the static per-arch binary
+beside it, so job images keep the "Linux + POSIX shell, nothing more"
+contract. `npm run build:shim` builds those binaries (Node SEA, linux-x64 and
+linux-arm64); without them the construct stages a node-on-PATH fallback
+bundle and warns at synth.
+
+The shim reports start/end/status per step and evaluates `skipIf` (guard exit
+0 → a SKIPPED step with `reason: skip_if`, and the job continues). **It does
+not write the table.** It emits step events via `events:PutEvents` under
+`source: millwright.step` — the only source the bus policy accepts from job
+roles, which have no DynamoDB access at all. The **step-events writer (C19)**,
+on the bus rule for that source, projects the events into step rows,
+idempotent on `(run, job, step-index)`; its role carries step-row
+`dynamodb:UpdateItem` and nothing else. Locally the same shim appends the
+same payloads to the file named by `MILLWRIGHT_STEP_EVENTS_FILE` instead.
+
+Honest residual, by design: the job role's grant confines the event *source*,
+not its contents, so a job can emit step events claiming another job's
+identity within its own run. Step rows are therefore **display-plane, never
+decision-plane** — they feed check content and `runs show`; terminal
+authority for jobs is always `BatchGetBuilds` (spec §7.8).
 
 Deploying bundles the Lambda handlers with esbuild (a regular dependency of
 this package) — no Docker required.
