@@ -1,17 +1,22 @@
 import {
   ConcurrencyGroupItem,
   EventIdentity,
+  JobItem,
+  JobStatus,
   RegistryItem,
   RunCoordinates,
   RunItem,
+  SkipReason,
   concurrencyGroupKey,
   eventDedupeKey,
   formatRunId,
+  jobKey,
   registryKey,
   runKey,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
 import {
+  ArtifactCopier,
   BusEventEnvelope,
   ExecutionStarter,
   LauncherDeps,
@@ -32,7 +37,41 @@ class MemoryStore implements LauncherStore {
   readonly registries = new Map<string, RegistryItem>();
   readonly counters = new Map<string, number>();
   readonly runs = new Map<string, RunItem>();
+  readonly jobs = new Map<string, JobItem[]>();
   readonly groups = new Map<string, { running?: string; pending?: string }>();
+
+  putRun(coords: RunCoordinates, overrides: Partial<RunItem> = {}): void {
+    const key = runKey(coords);
+    this.runs.set(key.pk + key.sk, {
+      ...key,
+      ...coords,
+      status: 'FAILED',
+      trigger: 'push',
+      ref: 'refs/heads/main',
+      sha: SHA,
+      createdAt: new Date(NOW - 3_600_000).toISOString(),
+      originalStartedAt: new Date(NOW - 3_600_000).toISOString(),
+      expiresAt: 0,
+      ...overrides,
+    });
+    this.counters.set(
+      `${coords.repo}#${coords.workflow}`,
+      Math.max(this.counters.get(`${coords.repo}#${coords.workflow}`) ?? 0, coords.runNumber),
+    );
+  }
+
+  putJob(coords: RunCoordinates, job: string, status: JobStatus, skipReason?: SkipReason): void {
+    const rows = this.jobs.get(runKey(coords).pk + runKey(coords).sk) ?? [];
+    rows.push({
+      ...jobKey(coords, job),
+      ...coords,
+      job,
+      status,
+      ...(skipReason ? { skipReason } : {}),
+      expiresAt: 0,
+    });
+    this.jobs.set(runKey(coords).pk + runKey(coords).sk, rows);
+  }
 
   putRegistry(repo: string, ref: string, workflows: Record<string, unknown>): void {
     const item: RegistryItem = {
@@ -88,6 +127,11 @@ class MemoryStore implements LauncherStore {
     const key = runKey(coords);
     const run = this.runs.get(key.pk + key.sk);
     return run ? { ...run } : undefined;
+  }
+
+  async listJobs(coords: RunCoordinates): Promise<readonly JobItem[]> {
+    const key = runKey(coords);
+    return this.jobs.get(key.pk + key.sk) ?? [];
   }
 
   async getGroup(group: string): Promise<ConcurrencyGroupItem | undefined> {
@@ -176,13 +220,29 @@ class MemoryStarter implements ExecutionStarter {
   }
 }
 
-function harness(): { deps: LauncherDeps; store: MemoryStore; starter: MemoryStarter } {
+class MemoryCopier implements ArtifactCopier {
+  readonly copies: { from: string; to: string }[] = [];
+
+  async copyPrefix(from: string, to: string): Promise<number> {
+    this.copies.push({ from, to });
+    return 1;
+  }
+}
+
+function harness(): {
+  deps: LauncherDeps;
+  store: MemoryStore;
+  starter: MemoryStarter;
+  copier: MemoryCopier;
+} {
   const store = new MemoryStore();
   const starter = new MemoryStarter();
+  const copier = new MemoryCopier();
   return {
     store,
     starter,
-    deps: { store, starter, metadataRetentionDays: 90, log: () => {} },
+    copier,
+    deps: { store, starter, copier, metadataRetentionDays: 90, log: () => {} },
   };
 }
 
@@ -445,5 +505,148 @@ describe('concurrency gating', () => {
     });
     expect(store.counters.get('octocat/app#deploy')).toBe(2);
     expect(starter.startedRuns).toEqual(['octocat/app#deploy#1']);
+  });
+});
+
+describe('rerun (spec §7.7)', () => {
+  const SOURCE: RunCoordinates = { repo: 'octocat/app', workflow: 'ci', runNumber: 41 };
+
+  function rerunEvent(overrides: Record<string, unknown> = {}): BusEventEnvelope {
+    return {
+      source: 'millwright.cli',
+      'detail-type': 'rerun',
+      detail: {
+        repo: 'octocat/app',
+        ref: 'refs/heads/main',
+        sha: SHA,
+        workflow: 'ci',
+        sourceRunNumber: 41,
+        nonce: 'nonce-1',
+        ...overrides,
+      },
+    };
+  }
+
+  it('creates a fresh-numbered run from the stored model and starts it resumed', async () => {
+    const { deps, store, starter, copier } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    store.putRun(SOURCE, { status: 'FAILED', sha: 'e'.repeat(40), ref: 'refs/heads/release' });
+
+    const result = await processBusEvent(deps, rerunEvent(), NOW);
+    expect(result).toEqual({
+      outcome: 'runs',
+      started: ['octocat/app#ci#42'],
+      queued: [],
+      settled: [],
+    });
+    const run = await store.getRun({ repo: 'octocat/app', workflow: 'ci', runNumber: 42 });
+    expect(run).toMatchObject({
+      status: 'PENDING',
+      trigger: 'rerun',
+      rerunOf: 'octocat/app#ci#41',
+      // The source RECORD is authoritative for what is rerun.
+      ref: 'refs/heads/release',
+      sha: 'e'.repeat(40),
+    });
+    expect(run?.reuseJobs).toBeUndefined();
+    expect(starter.startedRuns).toEqual(['octocat/app#ci#42']);
+    // Plain rerun copies only the stored model + packaged source.
+    expect(copier.copies).toEqual([
+      { from: 'runs/octocat/app/ci/41/in/', to: 'runs/octocat/app/ci/42/in/' },
+    ]);
+  });
+
+  it('--failed reuses succeeded outputs and reruns failed jobs plus their skipped dependents', async () => {
+    const { deps, store, copier } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    store.putRun(SOURCE, { status: 'FAILED' });
+    store.putJob(SOURCE, 'build', 'SUCCEEDED');
+    store.putJob(SOURCE, 'test', 'FAILED');
+    store.putJob(SOURCE, 'deploy', 'SKIPPED', 'upstream_failed');
+
+    const result = await processBusEvent(deps, rerunEvent({ failedOnly: true }), NOW);
+    expect(result).toMatchObject({ outcome: 'runs', started: ['octocat/app#ci#42'] });
+    const run = await store.getRun({ repo: 'octocat/app', workflow: 'ci', runNumber: 42 });
+    expect(run?.reuseJobs).toEqual(['build']);
+    expect(copier.copies).toEqual([
+      { from: 'runs/octocat/app/ci/41/in/', to: 'runs/octocat/app/ci/42/in/' },
+      { from: 'runs/octocat/app/ci/41/out/build/', to: 'runs/octocat/app/ci/42/out/build/' },
+    ]);
+  });
+
+  it('rejects --failed when nothing failed', async () => {
+    const { deps, store, starter } = harness();
+    store.putRun(SOURCE, { status: 'SUCCEEDED' });
+    store.putJob(SOURCE, 'build', 'SUCCEEDED');
+    store.putJob(SOURCE, 'guard', 'SKIPPED', 'skip_if');
+
+    const result = await processBusEvent(deps, rerunEvent({ failedOnly: true }), NOW);
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: expect.stringContaining('nothing failed'),
+    });
+    expect(starter.startedRuns).toEqual([]);
+    expect(store.counters.get('octocat/app#ci')).toBe(41);
+  });
+
+  it('rejects a missing or non-terminal source run', async () => {
+    const { deps, store } = harness();
+    expect(await processBusEvent(deps, rerunEvent(), NOW)).toMatchObject({
+      outcome: 'rejected',
+      reason: expect.stringContaining('does not exist'),
+    });
+    store.putRun(SOURCE, { status: 'RUNNING' });
+    expect(await processBusEvent(deps, rerunEvent({ nonce: 'nonce-2' }), NOW)).toMatchObject({
+      outcome: 'rejected',
+      reason: expect.stringContaining('not terminal'),
+    });
+  });
+
+  it('redeliveries coalesce on the nonce while new invocations start fresh runs', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    store.putRun(SOURCE, { status: 'FAILED' });
+
+    await processBusEvent(deps, rerunEvent(), NOW);
+    const redelivered = await processBusEvent(deps, rerunEvent(), NOW + 1000);
+    expect(redelivered).toEqual({
+      outcome: 'runs',
+      started: ['octocat/app#ci#42'],
+      queued: [],
+      settled: [],
+    });
+    expect(store.counters.get('octocat/app#ci')).toBe(42);
+
+    await processBusEvent(deps, rerunEvent({ nonce: 'nonce-2' }), NOW + 2000);
+    expect(store.counters.get('octocat/app#ci')).toBe(43);
+    expect(starter.startedRuns).toEqual(['octocat/app#ci#42', 'octocat/app#ci#43']);
+  });
+
+  it('gates through concurrency groups like any other run', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', {
+      ci: { triggers: [{ kind: 'push' }], concurrency: { group: 'ci-${ref}', policy: 'queue' } },
+    });
+    store.putRun(SOURCE, { status: 'FAILED' });
+    store.groups.set('ci-main', { running: 'octocat/app#ci#40' });
+
+    const result = await processBusEvent(deps, rerunEvent(), NOW);
+    expect(result).toMatchObject({ outcome: 'runs', queued: ['octocat/app#ci#42'] });
+    expect(store.groups.get('ci-main')).toEqual({
+      running: 'octocat/app#ci#40',
+      pending: 'octocat/app#ci#42',
+    });
+    expect(starter.startedRuns).toEqual([]);
+  });
+
+  it('fails closed on an uninterpretable registry concurrency entry', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', {
+      ci: { triggers: [{ kind: 'push' }], concurrency: { group: '', policy: 'sometimes' } },
+    });
+    store.putRun(SOURCE, { status: 'FAILED' });
+    const result = await processBusEvent(deps, rerunEvent(), NOW);
+    expect(result).toMatchObject({ outcome: 'rejected' });
+    expect(starter.startedRuns).toEqual([]);
   });
 });

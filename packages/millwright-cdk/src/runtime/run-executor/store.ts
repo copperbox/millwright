@@ -7,11 +7,15 @@ import {
   expiresAtAfterDays,
   jobKey,
   runKey,
-  runPartitionKey,
 } from '@copperbox/millwright-state';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { JobProjectionPatch, isConditionalCheckFailure, jobProjectionUpdate } from '../shared/jobs';
+import { GetCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  JobProjectionPatch,
+  isConditionalCheckFailure,
+  jobProjectionUpdate,
+  queryJobRows,
+} from '../shared/jobs';
 import { DeciderStore } from './iteration';
 
 /**
@@ -74,27 +78,7 @@ export class DynamoDeciderStore implements DeciderStore {
   }
 
   async listJobs(coords: RunCoordinates): Promise<readonly JobItem[]> {
-    const items: JobItem[] = [];
-    let lastKey: Record<string, unknown> | undefined;
-    do {
-      const result = await this.client.send(
-        new QueryCommand({
-          TableName: this.tableName,
-          KeyConditionExpression: 'pk = :pk AND begins_with(sk, :job)',
-          ExpressionAttributeValues: { ':pk': runPartitionKey(coords), ':job': 'JOB#' },
-          ConsistentRead: true,
-          ExclusiveStartKey: lastKey,
-        }),
-      );
-      for (const item of result.Items ?? []) {
-        // The JOB# prefix also matches step rows (JOB#<name>#STEP#<i>).
-        if (!(item.sk as string).includes('#STEP#')) {
-          items.push(item as JobItem);
-        }
-      }
-      lastKey = result.LastEvaluatedKey;
-    } while (lastKey);
-    return items;
+    return queryJobRows(this.client, this.tableName, coords);
   }
 
   async claimDispatch(

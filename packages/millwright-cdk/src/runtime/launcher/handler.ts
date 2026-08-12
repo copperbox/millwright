@@ -1,7 +1,9 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { S3Client } from '@aws-sdk/client-s3';
 import { SFNClient } from '@aws-sdk/client-sfn';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DEFAULT_METADATA_RETENTION_DAYS } from '@copperbox/millwright-state';
+import { S3PrefixCopier } from './copier';
 import { SfnExecutionStarter } from './executions';
 import { BusEventEnvelope, LauncherDeps, processBusEvent } from './launcher';
 import { DynamoLauncherStore } from './store';
@@ -56,6 +58,7 @@ function dependencies(): LauncherDeps {
         metadataRetentionDays,
       ),
       starter: new SfnExecutionStarter(new SFNClient({}), requireEnv('RUN_EXECUTOR_ARN'), log),
+      copier: new S3PrefixCopier(new S3Client({}), requireEnv('ARTIFACT_BUCKET_NAME')),
       metadataRetentionDays,
       log,
     };

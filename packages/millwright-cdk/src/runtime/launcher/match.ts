@@ -145,6 +145,27 @@ export function matchWorkflows(registry: RegistryItem, event: ValidBusEvent): Ma
 }
 
 /**
+ * One workflow's narrowed concurrency entry, for paths that bypass trigger
+ * matching (rerun): `undefined` = none declared (or no such workflow),
+ * `null` = declared but uninterpretable — callers must fail closed on null
+ * exactly like {@link matchWorkflows} does.
+ */
+export function workflowConcurrency(
+  registry: RegistryItem,
+  workflow: string,
+): MatchedWorkflow['concurrency'] | null | undefined {
+  const workflows =
+    typeof registry.workflows === 'object' && registry.workflows !== null
+      ? registry.workflows
+      : {};
+  const entry = workflows[workflow];
+  if (entry === undefined) {
+    return undefined;
+  }
+  return narrowConcurrency((entry as { concurrency?: unknown }).concurrency);
+}
+
+/**
  * Expand a concurrency group key's trigger-context tokens (spec §8.2):
  * `${repo}`, `${ref}` (short ref name), `${workflow}`, `${event}` (kind).
  */

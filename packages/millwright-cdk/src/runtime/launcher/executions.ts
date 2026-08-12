@@ -28,6 +28,12 @@ export interface RunExecutionInput {
   readonly sha: string;
   readonly trigger: string;
   readonly inputs?: Readonly<Record<string, string | boolean>>;
+  /**
+   * Skip straight to the decider loop. Set on carry-over executions (synth
+   * already happened) and on reruns (the launcher prefix-copied the stored
+   * model — reruns never re-synth, spec §7.7).
+   */
+  readonly resume?: true;
 }
 
 export interface SynthOnlyExecutionInput {
@@ -66,6 +72,7 @@ export class SfnExecutionStarter implements ExecutionStarter {
       sha: run.sha,
       trigger: run.trigger,
       ...(run.inputs ? { inputs: run.inputs } : {}),
+      ...(run.rerunOf ? { resume: true as const } : {}),
     };
     await this.start(
       executionName('run', `${run.repo}-${run.workflow}-${run.runNumber}`, runId),

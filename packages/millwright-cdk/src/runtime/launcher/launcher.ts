@@ -2,17 +2,20 @@ import {
   BRANCH_REF_PREFIX,
   ConcurrencyGroupItem,
   EventIdentity,
+  JobItem,
   RegistryItem,
   RunCoordinates,
   RunItem,
   ValidBusEvent,
   formatRunId,
+  jobOutputPrefix,
   parseRunId,
+  runInputPrefix,
   runKey,
   validateBusEvent,
   withMetadataTtl,
 } from '@copperbox/millwright-state';
-import { MatchedWorkflow, evaluateGroupKey, matchWorkflows } from './match';
+import { MatchedWorkflow, evaluateGroupKey, matchWorkflows, workflowConcurrency } from './match';
 
 /**
  * The launcher's pinned order (spec §7.1, council ruling B1 — validation
@@ -59,6 +62,8 @@ export interface LauncherStore {
    */
   createRun(run: RunItem, identity: EventIdentity, nowMs: number): Promise<boolean>;
   getRun(coords: RunCoordinates): Promise<RunItem | undefined>;
+  /** The source run's job rows — what a rerun's reuse set is computed from. */
+  listJobs(coords: RunCoordinates): Promise<readonly JobItem[]>;
   getGroup(group: string): Promise<ConcurrencyGroupItem | undefined>;
   /** Claim the group's running slot; succeeds when free or already ours. */
   claimRunningSlot(group: string, runId: string, nowMs: number): Promise<boolean>;
@@ -92,9 +97,19 @@ export interface ExecutionStarter {
   startSynthOnly(repo: string, ref: string, sha: string): Promise<void>;
 }
 
+export interface ArtifactCopier {
+  /**
+   * Copy every object under `fromPrefix` to the same relative key under
+   * `toPrefix` (the §7.7 rerun prefix-copy). Overwrite-idempotent. Returns
+   * the number of objects copied.
+   */
+  copyPrefix(fromPrefix: string, toPrefix: string): Promise<number>;
+}
+
 export interface LauncherDeps {
   readonly store: LauncherStore;
   readonly starter: ExecutionStarter;
+  readonly copier: ArtifactCopier;
   readonly metadataRetentionDays: number;
   readonly log: (message: string, fields?: Record<string, unknown>) => void;
 }
@@ -135,7 +150,10 @@ export async function processBusEvent(
     ref: event.ref,
     sha: event.sha,
     kind: event.kind,
-    qualifier: event.kind === 'cron' ? event.minute : undefined,
+    // cron: the fired minute; rerun: the CLI's per-invocation nonce, so
+    // redeliveries coalesce while every new command starts a fresh run.
+    qualifier:
+      event.kind === 'cron' ? event.minute : event.kind === 'rerun' ? event.nonce : undefined,
   };
 
   // 2. Dedupe / processing record.
@@ -148,6 +166,12 @@ export async function processBusEvent(
   if (event.kind === 'bootstrap') {
     await deps.starter.startSynthOnly(event.repo, event.ref, event.sha);
     return { outcome: 'bootstrap-started' };
+  }
+
+  // Reruns re-execute one named run from its stored model — no trigger
+  // matching, no bootstrap, no synth.
+  if (event.kind === 'rerun') {
+    return processRerun(deps, event, identity, claim.runIds, nowMs);
   }
 
   // 3. Match via the per-ref registry, falling back to the default branch's
@@ -211,6 +235,115 @@ export async function processBusEvent(
   return { outcome: 'runs', started, queued, settled };
 }
 
+/**
+ * The rerun path (spec §7.7): resolve the source run, compute the reuse set
+ * for `--failed`, create the new run (fresh number, `rerunOf`) from the
+ * STORED model, prefix-copy the model/source and reused outputs, then gate
+ * and start exactly like any other run — the execution input's `resume`
+ * flag (derived from `rerunOf`) skips synth.
+ */
+async function processRerun(
+  deps: LauncherDeps,
+  event: ValidBusEvent,
+  identity: EventIdentity,
+  claimedRunIds: Readonly<Record<string, string>>,
+  nowMs: number,
+): Promise<Disposition> {
+  const sourceCoords: RunCoordinates = {
+    repo: event.repo,
+    workflow: event.workflow!,
+    runNumber: event.sourceRunNumber!,
+  };
+  const sourceId = formatRunId(sourceCoords);
+  const source = await deps.store.getRun(sourceCoords);
+  if (!source) {
+    return { outcome: 'rejected', reason: `rerun source ${sourceId} does not exist` };
+  }
+  if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(source.status)) {
+    return {
+      outcome: 'rejected',
+      reason: `rerun source ${sourceId} is ${source.status}, not terminal`,
+    };
+  }
+
+  let reuseJobs: readonly string[] | undefined;
+  if (event.failedOnly) {
+    const rows = await deps.store.listJobs(sourceCoords);
+    const anyFailed = rows.some((row) =>
+      ['FAILED', 'TIMED_OUT', 'CANCELLED'].includes(row.status),
+    );
+    if (!anyFailed) {
+      // The CLI rejects this up front; here it only survives a race.
+      return { outcome: 'rejected', reason: `nothing failed in ${sourceId}; --failed rejects` };
+    }
+    reuseJobs = rows
+      .filter((row) => row.status === 'SUCCEEDED')
+      .map((row) => row.job)
+      .sort();
+  }
+
+  const overrides: Partial<RunItem> = {
+    trigger: 'rerun',
+    // The source run record is authoritative for what is being rerun; the
+    // event's ref/sha only shaped the dedupe identity.
+    ref: source.ref,
+    sha: source.sha,
+    rerunOf: sourceId,
+    ...(reuseJobs && reuseJobs.length > 0 ? { reuseJobs } : {}),
+    ...(source.inputs ? { inputs: source.inputs } : {}),
+  };
+  let obtained = await obtainRun(deps, event, identity, source.workflow, claimedRunIds, nowMs, overrides);
+  if (!obtained.created) {
+    const runIds = (await deps.store.claimEvent(identity, nowMs)).runIds;
+    obtained = await obtainRun(deps, event, identity, source.workflow, runIds, nowMs, overrides);
+  }
+  const run = obtained.run;
+  if (!run) {
+    return { outcome: 'runs', started: [], queued: [], settled: [] };
+  }
+  if (run.status !== 'PENDING') {
+    return { outcome: 'runs', started: [], queued: [], settled: [formatRunId(run)] };
+  }
+
+  // Prefix-copies BEFORE gating, so a queued rerun's inputs are in place
+  // whenever the group hand-off starts it. Redeliveries re-copy harmlessly.
+  await deps.copier.copyPrefix(runInputPrefix(sourceCoords), runInputPrefix(run));
+  for (const job of run.reuseJobs ?? []) {
+    await deps.copier.copyPrefix(jobOutputPrefix(sourceCoords, job), jobOutputPrefix(run, job));
+  }
+
+  // Reruns gate through concurrency groups like any other run (spec §7.7),
+  // under the ref's CURRENT registry entry — same lookup the original used.
+  const registry = await deps.store.getRegistryEntry(event.repo, source.ref);
+  const concurrency = registry ? workflowConcurrency(registry, run.workflow) : undefined;
+  if (concurrency === null) {
+    // Fail closed like matching does: never run without declared gating.
+    return {
+      outcome: 'rejected',
+      reason: `registry concurrency for ${run.workflow}@${source.ref} is uninterpretable`,
+    };
+  }
+  if (!registry) {
+    deps.log('no registry entry for rerun ref; gating without a group', {
+      repo: event.repo,
+      ref: source.ref,
+    });
+  }
+  const outcome = await gate(
+    deps,
+    run,
+    concurrency ? { workflow: run.workflow, concurrency } : { workflow: run.workflow },
+    event,
+    nowMs,
+  );
+  return {
+    outcome: 'runs',
+    started: outcome === 'started' ? [formatRunId(run)] : [],
+    queued: outcome === 'queued' ? [formatRunId(run)] : [],
+    settled: [],
+  };
+}
+
 async function obtainRun(
   deps: LauncherDeps,
   event: ValidBusEvent,
@@ -218,6 +351,7 @@ async function obtainRun(
   workflow: string,
   runIds: Readonly<Record<string, string>>,
   nowMs: number,
+  overrides: Partial<RunItem> = {},
 ): Promise<{ run: RunItem | undefined; created: boolean }> {
   const existing = runIds[workflow];
   if (existing) {
@@ -248,6 +382,7 @@ async function obtainRun(
       createdAt,
       originalStartedAt: createdAt,
       ...(event.inputs ? { inputs: event.inputs } : {}),
+      ...overrides,
     },
     nowMs,
     deps.metadataRetentionDays,

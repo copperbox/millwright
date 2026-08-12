@@ -1,11 +1,14 @@
 import {
+  JobItem,
   JobStatus,
   RunCoordinates,
   SkipReason,
   expiresAtAfterDays,
   jobKey,
+  runPartitionKey,
 } from '@copperbox/millwright-state';
-import type { UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
+import type { DynamoDBDocumentClient, UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 /**
  * Job-row projection writes shared by the decider and the build-events
@@ -70,6 +73,35 @@ export function jobProjectionUpdate(
     ExpressionAttributeNames: names,
     ExpressionAttributeValues: values,
   };
+}
+
+/** A run's job rows (its `JOB#` sort keys, step rows filtered out). */
+export async function queryJobRows(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  coords: RunCoordinates,
+): Promise<readonly JobItem[]> {
+  const items: JobItem[] = [];
+  let lastKey: Record<string, unknown> | undefined;
+  do {
+    const result = await client.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :job)',
+        ExpressionAttributeValues: { ':pk': runPartitionKey(coords), ':job': 'JOB#' },
+        ConsistentRead: true,
+        ExclusiveStartKey: lastKey,
+      }),
+    );
+    for (const item of result.Items ?? []) {
+      // The JOB# prefix also matches step rows (JOB#<name>#STEP#<i>).
+      if (!(item.sk as string).includes('#STEP#')) {
+        items.push(item as JobItem);
+      }
+    }
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+  return items;
 }
 
 export function isConditionalCheckFailure(err: unknown): boolean {

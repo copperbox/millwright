@@ -19,7 +19,7 @@ export interface LauncherProps {
   readonly bus: events.IEventBus;
   /** C9 — the state table (counter, runs, processing records, group claims). */
   readonly stateTable: dynamodb.ITable;
-  /** C12 — for the rerun prefix-copy grants (the copy itself is the rerun issue's). */
+  /** C12 — the §7.7 rerun prefix-copy source and destination. */
   readonly artifactBucket: s3.IBucket;
   /** State-table TTL horizon stamped onto launcher-written rows. */
   readonly metadataRetention: Duration;
@@ -72,7 +72,7 @@ export class Launcher extends Construct {
       eventPattern: {
         // millwright.step events belong to the step-events writer, not here.
         source: ['millwright.poller', 'millwright.cli'],
-        detailType: ['push', 'branch', 'tag', 'pr', 'cron', 'dispatch', 'bootstrap'],
+        detailType: ['push', 'branch', 'tag', 'pr', 'cron', 'dispatch', 'bootstrap', 'rerun'],
       },
       targets: [new targets.SqsQueue(this.queue)],
     });
@@ -87,6 +87,7 @@ export class Launcher extends Construct {
       environment: {
         STATE_TABLE_NAME: props.stateTable.tableName,
         RUN_EXECUTOR_ARN: this.runExecutorArn,
+        ARTIFACT_BUCKET_NAME: props.artifactBucket.bucketName,
         METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),
       },
       bundling: {

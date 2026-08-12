@@ -77,6 +77,18 @@ describe('SfnExecutionStarter', () => {
     });
   });
 
+  it('starts rerun runs with resume: true — reruns never re-synth', async () => {
+    const { client, inputs } = fakeSfn();
+    const starter = new SfnExecutionStarter(client, 'arn:sm', () => {});
+    await starter.startRun({ ...run(43), trigger: 'rerun', rerunOf: 'octocat/app#ci#42' });
+    expect(JSON.parse(inputs[0].input)).toMatchObject({
+      action: 'run',
+      runId: 'octocat/app#ci#43',
+      trigger: 'rerun',
+      resume: true,
+    });
+  });
+
   it('starts a synth-only execution keyed by (repo, ref, sha)', async () => {
     const { client, inputs } = fakeSfn();
     const starter = new SfnExecutionStarter(client, 'arn:sm', () => {});

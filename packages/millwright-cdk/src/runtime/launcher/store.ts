@@ -3,6 +3,7 @@ import {
   EVENT_DEDUPE_TTL_SECONDS,
   EventDedupeItem,
   EventIdentity,
+  JobItem,
   RegistryItem,
   RunCoordinates,
   RunItem,
@@ -22,6 +23,7 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { queryJobRows } from '../shared/jobs';
 import { LauncherStore } from './launcher';
 
 /**
@@ -163,6 +165,10 @@ export class DynamoLauncherStore implements LauncherStore {
       }),
     );
     return result.Item as RunItem | undefined;
+  }
+
+  async listJobs(coords: RunCoordinates): Promise<readonly JobItem[]> {
+    return queryJobRows(this.client, this.tableName, coords);
   }
 
   async getGroup(group: string): Promise<ConcurrencyGroupItem | undefined> {
