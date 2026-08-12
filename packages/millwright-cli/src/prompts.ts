@@ -1,10 +1,22 @@
 /**
- * Interactive stdin prompts for the two moments the CLI needs a human:
- * pasting a PAT (input muted) and confirming a manual deploy-key add.
+ * Interactive stdin prompts for the moments the CLI needs a human:
+ * pasting a PAT (input muted), confirming a manual deploy-key add, and
+ * answering a local run's typed-input questions.
  */
 
 import * as readline from 'node:readline';
 import { Writable } from 'node:stream';
+
+/** Read one echoed line; the question goes to stderr like every prompt. */
+export function promptLine(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
 
 /** Prompt without echoing the input — PATs never land in the scrollback. */
 export function promptSecret(question: string): Promise<string> {

@@ -5,9 +5,12 @@
  * at CloudWatch.
  */
 
+import * as path from 'node:path';
 import { CheckStateItem, JobItem, RunItem, StepItem } from '@copperbox/millwright-state';
 import { CommandError, manifestResource, requireManifestResource } from './config-plane';
 import { DiscoverOptions, SsmClientLike, discoverDeployment } from './discovery';
+import { findLocalRoot, isLocalRunId, localLayout, localRunPaths } from './local/local-layout';
+import { LocalRunFile, readLocalRunFile } from './local/state-sink';
 import {
   StateReadContext,
   discoverWorkflows,
@@ -41,8 +44,23 @@ export async function makeStateReadContext(
   return { ssm, ddb, deployment, stateTable };
 }
 
+/**
+ * The display-plane slices of the state-table items: cloud rows and local
+ * `.millwright/runs/local-N.json` records render through the same code, so
+ * everything below is typed on what it shows, not on table keys.
+ */
+export type RunView = Omit<RunItem, 'pk' | 'sk' | 'expiresAt' | 'originalStartedAt' | 'taskToken'>;
+export type JobView = Pick<JobItem, 'job' | 'status'> &
+  Partial<Pick<JobItem, 'startedAt' | 'finishedAt' | 'skipReason' | 'reusedFrom' | 'logStreamName'>>;
+export type StepView = Pick<StepItem, 'job' | 'stepIndex' | 'status'> &
+  Partial<Pick<StepItem, 'name' | 'startedAt' | 'finishedAt'>>;
+
 function shortSha(sha: string | undefined): string {
-  return sha ? sha.slice(0, 8) : '-';
+  if (!sha) {
+    return '-';
+  }
+  // Local runs mark a dirty working tree with a `-dirty` suffix; keep it.
+  return sha.endsWith('-dirty') ? `${sha.slice(0, 8)}-dirty` : sha.slice(0, 8);
 }
 
 /** `refs/heads/main` → `main`; tags keep a `tag:` marker; others verbatim. */
@@ -80,7 +98,7 @@ function formatDuration(startIso: string | undefined, endIso: string | undefined
   return `${rest}s`;
 }
 
-function runDuration(run: RunItem, now: () => Date): string {
+function runDuration(run: RunView, now: () => Date): string {
   const start = run.startedAt ?? run.createdAt;
   const end =
     run.finishedAt ??
@@ -188,7 +206,7 @@ export function cloudWatchLogLink(
   );
 }
 
-function jobOrder(a: JobItem, b: JobItem): number {
+function jobOrder(a: JobView, b: JobView): number {
   if (a.startedAt && b.startedAt && a.startedAt !== b.startedAt) {
     return a.startedAt < b.startedAt ? -1 : 1;
   }
@@ -201,7 +219,7 @@ function jobOrder(a: JobItem, b: JobItem): number {
   return a.job.localeCompare(b.job);
 }
 
-function describeJob(job: JobItem): string {
+function describeJob(job: JobView): string {
   const parts = [`${job.job}  ${job.status}`];
   const duration = formatDuration(job.startedAt, job.finishedAt);
   if (duration !== '-') {
@@ -216,7 +234,7 @@ function describeJob(job: JobItem): string {
   return parts.join('  ');
 }
 
-function describeStep(step: StepItem): string {
+function describeStep(step: StepView): string {
   const name = step.name ?? `step ${step.stepIndex + 1}`;
   const duration = formatDuration(step.startedAt, step.finishedAt);
   return `${step.stepIndex + 1}. ${name}  ${step.status}${duration === '-' ? '' : `  ${duration}`}`;
@@ -279,4 +297,66 @@ export async function runsShow(deps: RunsDeps, options: RunsShowOptions = {}): P
     );
   }
   return run;
+}
+
+export interface LocalRunsShowDeps {
+  readonly output: (line: string) => void;
+  readonly cwd?: string;
+  readonly now?: () => Date;
+}
+
+/**
+ * `runs show local-N` — the local half of the observability surface (spec
+ * §14): reads `.millwright/runs/local-N.json` from this clone and renders it
+ * through the same display code as a cloud run. No AWS calls; local runs
+ * live in a separate namespace and never appear in `runs list`.
+ */
+export function runsShowLocal(deps: LocalRunsShowDeps, id: string): LocalRunFile {
+  if (!isLocalRunId(id)) {
+    throw new CommandError(`"${id}" is not a local run id — expected local-N, like local-3`);
+  }
+  const root = findLocalRoot(deps.cwd ?? process.cwd());
+  const paths = localRunPaths(localLayout(root), id);
+  let state: LocalRunFile;
+  try {
+    state = readLocalRunFile(paths.stateFile);
+  } catch {
+    throw new CommandError(
+      `no local run "${id}" recorded under ${path.join(root, '.millwright', 'runs')}`,
+    );
+  }
+  const run = state.run;
+
+  deps.output(`${run.repo}/${run.workflow} ${state.id}  ${run.status}`);
+  deps.output(`  local run — never reported to GitHub`);
+  deps.output(`  trigger local  ${shortRef(run.ref)} @ ${shortSha(run.sha)}`);
+  deps.output(
+    `  created ${run.createdAt}` +
+      (run.startedAt ? `  started ${run.startedAt}` : '') +
+      (run.finishedAt ? `  finished ${run.finishedAt}` : '') +
+      `  duration ${runDuration(run, deps.now ?? (() => new Date()))}`,
+  );
+  if (run.inputs && Object.keys(run.inputs).length > 0) {
+    deps.output(
+      `  inputs ${Object.entries(run.inputs)
+        .map(([name, value]) => `${name}=${value}`)
+        .join(' ')}`,
+    );
+  }
+  if (run.cancelRequested && run.status !== 'CANCELLED') {
+    deps.output('  cancellation requested');
+  }
+
+  if (state.jobs.length === 0) {
+    deps.output('  no jobs recorded');
+  }
+  for (const job of [...state.jobs].sort(jobOrder)) {
+    deps.output(`  ${describeJob(job)}`);
+    for (const step of state.steps
+      .filter((step) => step.job === job.job)
+      .sort((a, b) => a.stepIndex - b.stepIndex)) {
+      deps.output(`    ${describeStep(step)}`);
+    }
+  }
+  return state;
 }

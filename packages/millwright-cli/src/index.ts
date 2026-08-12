@@ -48,13 +48,80 @@ export {
   resolveWorkflow,
 } from './run-ref';
 export {
+  JobView,
+  LocalRunsShowDeps,
+  RunView,
   RunsDeps,
   RunsListOptions,
   RunsShowOptions,
+  StepView,
   cloudWatchLogLink,
   runsList,
   runsShow,
+  runsShowLocal,
 } from './runs';
+export {
+  CONTAINER_CACHE,
+  CONTAINER_EVENTS,
+  CONTAINER_OUT,
+  CONTAINER_SCRIPT,
+  CONTAINER_SHIM,
+  CONTAINER_WORKSPACE,
+  DockerExecutor,
+  DockerExecutorDeps,
+  DockerProcess,
+  Executor,
+  LocalExecution,
+  LocalJobSpec,
+  buildDockerRunArgs,
+  createDockerProcessRunner,
+} from './local/executor';
+export {
+  LocalLayout,
+  LocalRunPaths,
+  allocateLocalRun,
+  findLocalRoot,
+  isLocalRunId,
+  listLocalRunNumbers,
+  localLayout,
+  localRunNumber,
+  localRunPaths,
+} from './local/local-layout';
+export {
+  LocalJobState,
+  LocalRunFile,
+  LocalRunFileError,
+  LocalRunState,
+  LocalStateSink,
+  LocalStepState,
+  NewLocalRun,
+  StateSink,
+  readLocalRunFile,
+} from './local/state-sink';
+export { renderLocalScript } from './local/local-script';
+export {
+  DEFAULT_DEFINITION_ENTRY,
+  LocalRunDeps,
+  LocalRunOptions,
+  LocalRunResult,
+  localRun,
+} from './local/local-run';
+export { declaredManualInputs, parseInputArgs, resolveLocalInputs } from './local/local-inputs';
+export {
+  LocalSecretsSource,
+  MissingSecret,
+  loadLocalSecrets,
+  missingSecrets,
+  parseEnvFile,
+  secretEnvForJob,
+} from './local/secrets-env';
+export {
+  GitRunner as LocalGitRunner,
+  createGitRunner,
+  createSourceArchive,
+  packTarGz,
+} from './local/source-archive';
+export { resolveShimDir, shimDeliveryCandidates } from './local/shim-delivery';
 export { CloudWatchLogsClientLike, LogsDeps, LogsOptions, logs } from './logs';
 export {
   AwsClientLike,

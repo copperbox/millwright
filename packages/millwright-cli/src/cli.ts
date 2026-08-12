@@ -6,23 +6,31 @@ import { IAMClient } from '@aws-sdk/client-iam';
 import { ServiceQuotasClient } from '@aws-sdk/client-service-quotas';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import * as os from 'node:os';
 import {
   GithubCredentialsFormatError,
   KeyFormatError,
   RepoConfigFormatError,
+  RunModelError,
 } from '@copperbox/millwright-state';
 import { Command } from 'commander';
 import { CommandError } from './config-plane';
+import { DefinitionLoadError } from './definition-loader';
 import { DEPLOYMENT_ENV_VAR, DiscoveryError } from './discovery';
 import { DoctorDeps, doctor } from './doctor';
 import { GitProtocolError } from './git/ls-refs';
 import { HostKeyMismatchError } from './git/ssh';
 import { GithubApiError } from './github/rest';
 import { init } from './init';
+import { DockerExecutor, createDockerProcessRunner } from './local/executor';
+import { isLocalRunId } from './local/local-layout';
+import { LocalRunDeps, localRun } from './local/local-run';
+import { resolveShimDir } from './local/shim-delivery';
+import { createGitRunner } from './local/source-archive';
 import { LogsDeps, logs } from './logs';
-import { promptSecret, waitForOperator } from './prompts';
+import { promptLine, promptSecret, waitForOperator } from './prompts';
 import { RepoDeps, repoAdd, repoList, repoRemove, repoUpdate } from './repo';
-import { RunsDeps, runsList, runsShow } from './runs';
+import { RunsDeps, runsList, runsShow, runsShowLocal } from './runs';
 import { secretsSet } from './secrets';
 import { SetupDeps, refreshHostKeys, setup } from './setup';
 import { VERSION } from './version';
@@ -65,6 +73,35 @@ function setupDeps(): SetupDeps {
     fetchLike: fetch,
     output,
     promptSecret,
+  };
+}
+
+function localRunDeps(): LocalRunDeps {
+  return {
+    output,
+    git: createGitRunner(),
+    executor: new DockerExecutor({
+      run: createDockerProcessRunner(),
+      onLog: (job, line) => output(`[${job}] ${line}`),
+      warn: (message) => process.stderr.write(`${message}\n`),
+    }),
+    shimDir: resolveShimDir(process.env),
+    cwd: process.cwd(),
+    promptLine: process.stdin.isTTY ? promptLine : undefined,
+    onCancel: (handler) => {
+      let fired = false;
+      const listener = () => {
+        if (fired) {
+          // Second Ctrl-C: the operator wants out now.
+          process.exit(130);
+        }
+        fired = true;
+        handler();
+      };
+      process.on('SIGINT', listener);
+      return () => process.removeListener('SIGINT', listener);
+    },
+    defaultParallel: Math.max(1, os.availableParallelism?.() ?? os.cpus().length),
   };
 }
 
@@ -236,6 +273,48 @@ export function buildProgram(): Command {
       }
     });
 
+  program
+    .command('run')
+    .description('run a workflow locally in docker — always local; cloud runs use "dispatch"')
+    .argument('<workflow>', 'workflow name from the definition')
+    .option('--job <name>', "run one job, its consumes fed from prior local runs' artifacts")
+    .option('--with-deps', 'with --job: run the ancestor subgraph instead of reusing')
+    .option('--clean', 'run from "git archive HEAD" instead of the working tree')
+    .option('--platform <p>', 'docker --platform, for exact-arch parity with the cloud')
+    .option('--secrets-file <path>', 'env file with declared secret values (default .millwright/secrets.env)')
+    .option(
+      '--input <k=v>',
+      'typed input for a Trigger.manual workflow (repeatable; prompted when omitted)',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option('--as-tag <tag>', 'fake a tag ref for the run context (e.g. v9.9.9-test)')
+    .option('--parallel <n>', 'max concurrent jobs (default: CPU count)', (value) =>
+      Number.parseInt(value, 10),
+    )
+    .option('--entry <path>', 'definition entry point', 'millwright/workflows.ts')
+    .action(
+      async (
+        workflow: string,
+        options: {
+          job?: string;
+          withDeps?: boolean;
+          clean?: boolean;
+          platform?: string;
+          secretsFile?: string;
+          input: string[];
+          asTag?: string;
+          parallel?: number;
+          entry?: string;
+        },
+      ) => {
+        const result = await localRun(localRunDeps(), { workflow, ...options });
+        if (result.status !== 'SUCCEEDED') {
+          process.exitCode = 1;
+        }
+      },
+    );
+
   const runs = program.command('runs').description('inspect runs recorded in the state table');
 
   runs
@@ -251,9 +330,13 @@ export function buildProgram(): Command {
 
   runs
     .command('show')
-    .description('show one run — jobs, steps, checks; defaults to the latest run')
-    .argument('[run]', 'run id like ci#142 (or owner/repo/ci#142); omit for the latest')
+    .description('show one run — jobs, steps, checks; defaults to the latest run; local-N reads this clone')
+    .argument('[run]', 'run id like ci#142, owner/repo/ci#142, or local-3; omit for the latest')
     .action(async (run: string | undefined) => {
+      if (run && isLocalRunId(run)) {
+        runsShowLocal({ output }, run);
+        return;
+      }
       await runsShow(runsDeps(), { run, explicitName: program.opts().deployment });
     });
 
@@ -310,6 +393,8 @@ const USER_FACING_ERRORS = [
   RepoConfigFormatError,
   GithubCredentialsFormatError,
   KeyFormatError,
+  RunModelError,
+  DefinitionLoadError,
 ];
 
 export async function main(argv: readonly string[]): Promise<number> {
