@@ -19,7 +19,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@copperbox/millwright-state": "^0.1.0"
+    "@copperbox/millwright-state": "^0.1.0",
+    "@copperbox/millwright-workflows": "^0.1.0"
   },
   "peerDependencies": {
     "aws-cdk-lib": "^2.100.0",
