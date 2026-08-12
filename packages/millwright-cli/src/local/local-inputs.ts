@@ -94,12 +94,8 @@ export async function resolveLocalInputs(
     values[name] = typeRawValue(name, raw, declaration);
   }
 
-  const required = Object.entries(declared).filter(
-    ([name, input]) =>
-      input.type === 'choice' && input.default === undefined && values[name] === undefined,
-  );
-  for (const [name, input] of required) {
-    if (input.type !== 'choice') {
+  for (const [name, input] of Object.entries(declared)) {
+    if (input.type !== 'choice' || input.default !== undefined || values[name] !== undefined) {
       continue;
     }
     if (!options.promptLine) {

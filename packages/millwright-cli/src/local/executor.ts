@@ -81,7 +81,7 @@ export interface DockerExecutorDeps {
 export function createDockerProcessRunner(): DockerExecutorDeps['run'] {
   return (command, args, onLine) => {
     const child = spawn(command, args as string[], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let buffered = { out: '', err: '' };
+    const buffered = { out: '', err: '' };
     const push = (key: 'out' | 'err', chunk: Buffer) => {
       buffered[key] += chunk.toString('utf8');
       const lines = buffered[key].split('\n');

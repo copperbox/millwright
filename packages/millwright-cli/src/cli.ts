@@ -24,7 +24,7 @@ import { GithubApiError } from './github/rest';
 import { init } from './init';
 import { DockerExecutor, createDockerProcessRunner } from './local/executor';
 import { isLocalRunId } from './local/local-layout';
-import { LocalRunDeps, localRun } from './local/local-run';
+import { DEFAULT_DEFINITION_ENTRY, LocalRunDeps, localRun } from './local/local-run';
 import { resolveShimDir } from './local/shim-delivery';
 import { createGitRunner } from './local/source-archive';
 import { LogsDeps, logs } from './logs';
@@ -292,7 +292,7 @@ export function buildProgram(): Command {
     .option('--parallel <n>', 'max concurrent jobs (default: CPU count)', (value) =>
       Number.parseInt(value, 10),
     )
-    .option('--entry <path>', 'definition entry point', 'millwright/workflows.ts')
+    .option('--entry <path>', 'definition entry point', DEFAULT_DEFINITION_ENTRY)
     .action(
       async (
         workflow: string,
