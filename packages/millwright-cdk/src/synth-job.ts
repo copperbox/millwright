@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import * as fs from 'node:fs';
+import { copyFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { RUNS_PREFIX } from '@copperbox/millwright-state';
 import { Aws, DockerImage, Duration } from 'aws-cdk-lib';
@@ -16,6 +14,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Asset } from 'aws-cdk-lib/aws-s3-assets';
 import { Construct } from 'constructs';
+import { buildSync } from 'esbuild';
 import { SUPPORTED_SCHEMA_VERSION } from './version';
 
 export interface SynthJobProps {
@@ -97,7 +96,7 @@ export class SynthJob extends Construct {
         image: DockerImage.fromRegistry('public.ecr.aws/docker/library/node:22'),
         local: {
           tryBundle(outputDir: string): boolean {
-            fs.copyFileSync(
+            copyFileSync(
               synthToolsBundlePath(),
               join(outputDir, 'synth-job.bundle.js'),
             );
@@ -308,14 +307,15 @@ function synthToolsBundlePath(): string {
         'it from — reinstall @copperbox/millwright-cli',
     );
   }
-  execFileSync(process.execPath, [
-    require.resolve('esbuild/bin/esbuild'),
-    entry,
-    '--bundle',
-    '--platform=node',
-    '--target=node22',
-    `--outfile=${bundle}`,
-    '--log-level=warning',
-  ]);
+  // esbuild's JS API, not its bin script: the installed bin is the native
+  // executable on most platforms, which `node` cannot run.
+  buildSync({
+    entryPoints: [entry],
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    outfile: bundle,
+    logLevel: 'warning',
+  });
   return bundle;
 }
