@@ -7,6 +7,15 @@ export {
   SsmClientLike,
   discoverDeployment,
 } from './discovery';
+export {
+  DispatchDeps,
+  DispatchError,
+  DispatchOptions,
+  GitRunner,
+  createDispatchDeps,
+  dispatch,
+  parseInputArgs,
+} from './dispatch';
 export { InitOptions, InitResult, init } from './init';
 export { compileGlob, createHashFilesResolver, hashFilesInTree } from './hash-files';
 export { DefinitionLoadError, LoadOptions, loadDefinition } from './definition-loader';

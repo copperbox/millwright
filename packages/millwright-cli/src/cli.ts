@@ -1,5 +1,6 @@
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { Command } from 'commander';
+import { DispatchError, createDispatchDeps, dispatch } from './dispatch';
 import { DEPLOYMENT_ENV_VAR, DiscoveryError, discoverDeployment } from './discovery';
 import { init } from './init';
 import { DEFAULT_ENTRY, runSynthCommand } from './synth-command';
@@ -82,6 +83,34 @@ export function buildProgram(): Command {
     );
 
   program
+    .command('dispatch')
+    .description(
+      'start a cloud run of a workflow — always at a ref (default: the default-branch head), ' +
+        'resolved to a sha so definition and source are pinned together',
+    )
+    .argument('<workflow>', 'workflow name as declared in workflows.ts')
+    .option('--ref <ref>', 'branch, tag or full ref to run at')
+    .option(
+      '--input <k=v>',
+      'typed workflow input (repeatable); validated against Trigger.manual',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option('--repo <owner/name>', 'repo override when not run from a checkout of it')
+    .action(async (workflow: string, options: { ref?: string; input: string[]; repo?: string }) => {
+      await dispatch(
+        {
+          workflow,
+          ref: options.ref,
+          inputs: options.input,
+          repo: options.repo,
+          deployment: program.opts().deployment,
+        },
+        createDispatchDeps(),
+      );
+    });
+
+  program
     .command('doctor')
     .description('verify the deployment chain (v0: SSM manifest discovery)')
     .action(async () => {
@@ -105,7 +134,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     await program.parseAsync(argv as string[]);
     return 0;
   } catch (err) {
-    if (err instanceof DiscoveryError) {
+    if (err instanceof DiscoveryError || err instanceof DispatchError) {
       process.stderr.write(`millwright: ${err.message}\n`);
       return 1;
     }

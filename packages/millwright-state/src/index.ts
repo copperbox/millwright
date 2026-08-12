@@ -103,6 +103,36 @@ export {
   workflowFromModel,
 } from './run-model';
 export {
+  JOB_ROLE_INLINE_POLICY_NAME,
+  JOB_ROLE_NAME_MAX_LENGTH,
+  JOB_ROLE_NAME_PREFIX,
+  JOB_ROLE_TAG_KEYS,
+  JOB_ROLE_VARIANTS,
+  JobRoleIdentity,
+  JobRoleVariant,
+  STALE_JOB_ROLE_RETENTION_DAYS,
+  jobRoleIdentityFromTags,
+  jobRoleName,
+  jobRoleNamePair,
+  jobRolePath,
+  jobRoleTags,
+} from './job-roles';
+export {
+  JobRolePolicyContext,
+  JobRoleSecretGrants,
+  PolicyDocument,
+  PolicyStatement,
+  fullPolicyDocument,
+  jobRolePolicyHash,
+  jobRoleTrustPolicy,
+  noSecretPolicyDocument,
+} from './job-role-policies';
+export {
+  matchesAllowedRefPattern,
+  refReceivesSecrets,
+  selectJobRoleVariant,
+} from './secrets-refs';
+export {
   BUILD_MAPPING_TTL_SECONDS,
   DEFAULT_METADATA_RETENTION_DAYS,
   EVENT_DEDUPE_TTL_SECONDS,
@@ -118,6 +148,7 @@ export {
   ParsedPollingKey,
   PollingRowKind,
   QUARANTINE_SORT_KEY,
+  RECONCILED_HOST_KEYS_KEY,
   REF_MAP_SORT_KEY,
   cronLastFiredKey,
   parseRepoPollingKey,
@@ -125,6 +156,11 @@ export {
   quarantineKey,
   refMapKey,
 } from './polling';
+export {
+  DEFAULT_REPO_POLLING_CONFIG,
+  RepoPollingConfig,
+  parseRepoPollingConfig,
+} from './repo-config';
 export {
   configPlaneRoot,
   deployKeyParameterName,
