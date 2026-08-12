@@ -58,13 +58,13 @@ export function createPktLineFeeder(onPacket: (packet: Packet) => void): (chunk:
       // delivered must already be off the buffer by then.
       if (length <= 2) {
         pending = pending.subarray(4);
-        onPacket(
-          length === 0
-            ? { type: 'flush' }
-            : length === 1
-              ? { type: 'delim' }
-              : { type: 'response-end' },
-        );
+        if (length === 0) {
+          onPacket({ type: 'flush' });
+        } else if (length === 1) {
+          onPacket({ type: 'delim' });
+        } else {
+          onPacket({ type: 'response-end' });
+        }
         continue;
       }
       const text = pending.subarray(4, length).toString('utf8').replace(/\n$/, '');
