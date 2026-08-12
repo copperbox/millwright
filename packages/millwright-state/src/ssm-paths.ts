@@ -45,6 +45,23 @@ export function repoConfigParameterName(deploymentName: string, repo: string): s
   return `${configPlaneRoot(deploymentName)}/repos/${repo}/config`;
 }
 
+/**
+ * Inverse of `repoConfigParameterName` for one deployment; undefined when the
+ * name is not one of its repo-config parameters. The poller and `repo list`
+ * discover repos by listing the `/repos/` prefix and inverting each name.
+ */
+export function repoFromConfigParameterName(
+  deploymentName: string,
+  parameterName: string,
+): string | undefined {
+  const prefix = `${configPlaneRoot(deploymentName)}/repos/`;
+  if (!parameterName.startsWith(prefix) || !parameterName.endsWith('/config')) {
+    return undefined;
+  }
+  const repo = parameterName.slice(prefix.length, -'/config'.length);
+  return repo.length > 0 ? repo : undefined;
+}
+
 /** SecureString — the repo's read-only Ed25519 deploy key. */
 export function deployKeyParameterName(deploymentName: string, repo: string): string {
   assertPathSegment('repo', repo);

@@ -12,6 +12,7 @@ import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
 import { Poller } from './poller';
+import { Reporter } from './reporter';
 import { SynthJob } from './synth-job';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
@@ -101,6 +102,8 @@ export class Millwright extends Construct {
   readonly launcher: Launcher;
   /** C2 — the tier-1 SSH ls-refs poller and its tick schedule. */
   readonly poller: Poller;
+  /** C8 — the reporter: sole owner of check reconciliation to GitHub. */
+  readonly reporter: Reporter;
   /** SSM name of the self-registered deployment manifest — the CLI's discovery root. */
   readonly manifestParameterName: string;
   /** The deployment manifest parameter. */
@@ -192,6 +195,12 @@ export class Millwright extends Construct {
       stateTable: this.stateTable,
       busName: this.eventBus.busName,
       pollerRoleName: this.eventBus.pollerRoleName,
+      configKey: this.configKey,
+    });
+
+    this.reporter = new Reporter(this, 'Reporter', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
       configKey: this.configKey,
     });
 

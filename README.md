@@ -40,7 +40,14 @@ npm publish --workspaces
 ```sh
 npx @copperbox/millwright-cli init   # scaffold the two-file CDK app
 npm install && npx cdk deploy        # deploy the control plane
+millwright setup                     # create the GitHub App, pin host keys
+millwright repo add acme/api         # onboard a repo end to end
 ```
+
+`setup` creates the per-deployment GitHub App via the manifest flow (or takes
+a fine-grained PAT with `--pat`); `repo add` writes the repo's config, mints
+and installs a read-only deploy key, verifies it over SSH, and primes the
+registry. See the [CLI README](packages/millwright-cli) for details.
 
 The deployed construct self-registers a manifest at
 `/millwright/<name>/manifest`; the CLI discovers it with zero configuration
@@ -94,3 +101,14 @@ against the workflow's `Trigger.manual` declaration — choices are validated
 and booleans take `true`/`false`. The event goes onto the deployment's bus
 under your own AWS credentials with `source: millwright.cli`; the bus resource
 policy and the launcher both reject `dispatch` events from any other source.
+
+### Checks and branch protection
+
+Every cloud run reports to its commit sha: one check per job named
+`<workflow> / <job>`, plus a `<workflow> / synth` check per run that is
+created `in_progress` at run start and fails with the synth error in its
+summary when `millwright/workflows.ts` is broken. In branch protection,
+require the gating workflows' `<workflow> / synth` contexts (and whichever
+job contexts should gate) — not `millwright / synth`, which only
+bootstrap-only executions report. PAT-mode deployments report commit
+statuses under identical context names, so the same required contexts work.

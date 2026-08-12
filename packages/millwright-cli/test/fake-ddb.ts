@@ -1,0 +1,52 @@
+import { GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDocClientLike } from '../src/state-reads';
+
+type Item = Record<string, unknown> & { pk: string; sk: string };
+
+/**
+ * In-memory DynamoDB document client covering the reads the CLI issues:
+ * GetCommand and pk-equality queries with an optional begins_with(sk, …).
+ */
+export class FakeDdb implements DynamoDocClientLike {
+  private readonly tables = new Map<string, Map<string, Item>>();
+
+  put(table: string, item: Item): void {
+    let rows = this.tables.get(table);
+    if (!rows) {
+      rows = new Map();
+      this.tables.set(table, rows);
+    }
+    rows.set(`${item.pk}\u0000${item.sk}`, item);
+  }
+
+  async send(command: unknown): Promise<any> {
+    if (command instanceof GetCommand) {
+      const { TableName, Key } = command.input;
+      const rows = this.tables.get(TableName!);
+      const item = rows?.get(`${(Key as Item).pk}\u0000${(Key as Item).sk}`);
+      return { Item: item };
+    }
+    if (command instanceof QueryCommand) {
+      const { TableName, KeyConditionExpression, ExpressionAttributeValues, Limit } = command.input;
+      const values = ExpressionAttributeValues as Record<string, unknown>;
+      const pk = values[':pk'] as string;
+      const skPrefix = KeyConditionExpression?.includes('begins_with')
+        ? (values[':sk'] as string)
+        : undefined;
+      const rows = this.tables.get(TableName!) ?? new Map<string, Item>();
+      let matches = [...rows.values()]
+        .filter((item) => item.pk === pk && (skPrefix === undefined || item.sk.startsWith(skPrefix)))
+        .sort((a, b) => {
+          if (a.sk === b.sk) {
+            return 0;
+          }
+          return a.sk < b.sk ? -1 : 1;
+        });
+      if (Limit !== undefined) {
+        matches = matches.slice(0, Limit);
+      }
+      return { Items: matches };
+    }
+    throw new Error(`FakeDdb: unexpected command ${(command as object)?.constructor?.name}`);
+  }
+}

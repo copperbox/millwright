@@ -143,6 +143,17 @@ export {
   withMetadataTtl,
 } from './ttl';
 export {
+  EVENT_BUS_ENV,
+  STEP_EVENTS_FILE_ENV,
+  STEP_EVENT_DETAIL_TYPE,
+  StepEventDetail,
+  StepEventValidation,
+  StepSkipReason,
+  ValidStepEvent,
+  stepEventDetail,
+  validateStepEvent,
+} from './step-events';
+export {
   CIRCUIT_BREAKER_KEY,
   PR_ETAG_SORT_KEY,
   ParsedPollingKey,
@@ -157,11 +168,6 @@ export {
   refMapKey,
 } from './polling';
 export {
-  DEFAULT_REPO_POLLING_CONFIG,
-  RepoPollingConfig,
-  parseRepoPollingConfig,
-} from './repo-config';
-export {
   configPlaneRoot,
   deployKeyParameterName,
   deploymentNameFromManifestParameter,
@@ -169,8 +175,28 @@ export {
   hostKeysParameterName,
   manifestParameterName,
   repoConfigParameterName,
+  repoFromConfigParameterName,
   secretParameterName,
 } from './ssm-paths';
+export {
+  DEFAULT_REPO_POLLING_CONFIG,
+  ForkPrPolicy,
+  RepoConfig,
+  RepoConfigFormatError,
+  RepoPollingConfig,
+  defaultRepoConfig,
+  parseRepoConfig,
+  parseRepoPollingConfig,
+  serializeRepoConfig,
+} from './repo-config';
+export {
+  GithubAppCredentials,
+  GithubCredentials,
+  GithubCredentialsFormatError,
+  GithubPatCredentials,
+  parseGithubCredentials,
+  serializeGithubCredentials,
+} from './github-credentials';
 export {
   RoleVariant,
   gateJobSecrets,
@@ -179,6 +205,35 @@ export {
   secretsAllowedRefsFromConfig,
   selectRoleVariant,
 } from './secrets-gate';
+export {
+  BOOTSTRAP_SYNTH_CONTEXT,
+  CHECK_ABANDON_AFTER_DAYS,
+  CHECK_BACKOFF_BASE_SECONDS,
+  CHECK_BACKOFF_CAP_SECONDS,
+  COMMIT_STATUS_DESCRIPTION_LIMIT,
+  CheckConclusion,
+  CheckStateFormatError,
+  CheckStatus,
+  CommitStatusPayload,
+  CommitStatusState,
+  DesiredCheckState,
+  JobCheckContent,
+  StepReportLine,
+  SYNTH_CONTEXT_SEGMENT,
+  checkBackoffSeconds,
+  checkConclusionForJobStatus,
+  commitStatusForDesired,
+  desiredJobCheck,
+  desiredSynthFailed,
+  desiredSynthStarted,
+  desiredSynthSucceeded,
+  isCheckUnconvergedPastDeadline,
+  jobCheckContext,
+  jobCheckSummary,
+  parseDesiredCheckState,
+  serializeDesiredCheckState,
+  synthCheckContext,
+} from './checks';
 export {
   BuildspecContext,
   CACHE_URI_ENV,

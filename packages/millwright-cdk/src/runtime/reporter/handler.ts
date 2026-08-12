@@ -1,0 +1,111 @@
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { KeyFormatError, parseCheckStateKey, parseGithubCredentials } from '@copperbox/millwright-state';
+import { log, requireEnv } from '../shared/lambda';
+import { GithubCheckPublisher } from './github';
+import { CheckCoordinates, ReporterDeps, reconcileCheck, sweepChecks } from './reporter';
+import { DynamoReporterStore } from './store';
+
+/**
+ * Reporter Lambda entry point (C8) — the sole owner of check reconciliation
+ * to GitHub. Two event sources, one function, so the installation-token
+ * cache warms across both: the state table's DynamoDB stream (happy path,
+ * filtered to `CHECK#` keys) and the 1-min sweep rule (backstop), which
+ * sends `{ "sweep": true }`.
+ */
+
+interface StreamRecord {
+  readonly eventName?: string;
+  readonly dynamodb?: { readonly Keys?: { readonly pk?: { S?: string }; readonly sk?: { S?: string } } };
+}
+
+export interface ReporterEvent {
+  readonly Records?: readonly StreamRecord[];
+  readonly sweep?: boolean;
+}
+
+/**
+ * The check coordinates a stream batch asks to reconcile, deduplicated by
+ * item — several desired writes to one check coalesce into one reconcile
+ * (which reads the latest state anyway). REMOVE events are TTL clearing
+ * house; there is nothing left to converge.
+ */
+export function coordinatesFromStreamRecords(
+  records: readonly StreamRecord[],
+): CheckCoordinates[] {
+  const byKey = new Map<string, CheckCoordinates>();
+  for (const record of records) {
+    if (record.eventName === 'REMOVE') {
+      continue;
+    }
+    const pk = record.dynamodb?.Keys?.pk?.S;
+    const sk = record.dynamodb?.Keys?.sk?.S;
+    if (!pk || !sk) {
+      continue;
+    }
+    try {
+      const { repo, sha, context } = parseCheckStateKey({ pk, sk });
+      byKey.set(`${pk}\u0000${sk}`, { repo, sha, context });
+    } catch (err) {
+      // Defense in depth: the event-source filter should only pass CHECK#
+      // keys, so anything else is skipped, not fatal.
+      if (!(err instanceof KeyFormatError)) {
+        throw err;
+      }
+    }
+  }
+  return [...byKey.values()];
+}
+
+let deps: ReporterDeps | undefined;
+
+function dependencies(): ReporterDeps {
+  if (!deps) {
+    const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+      marshallOptions: { removeUndefinedValues: true },
+    });
+    const ssm = new SSMClient({});
+    const parameterName = requireEnv('GITHUB_CREDENTIALS_PARAMETER');
+    deps = {
+      store: new DynamoReporterStore(dynamo, requireEnv('STATE_TABLE_NAME')),
+      publisher: new GithubCheckPublisher({
+        fetchLike: fetch,
+        loadCredentials: async () => {
+          const result = await ssm.send(
+            new GetParameterCommand({ Name: parameterName, WithDecryption: true }),
+          );
+          if (!result.Parameter?.Value) {
+            throw new Error(`SSM parameter ${parameterName} is empty — run millwright setup`);
+          }
+          return parseGithubCredentials(result.Parameter.Value);
+        },
+      }),
+      log,
+    };
+  }
+  return deps;
+}
+
+export const handler = async (event: ReporterEvent): Promise<void> => {
+  const resolved = dependencies();
+  const nowMs = Date.now();
+  if (event.Records?.length) {
+    for (const coords of coordinatesFromStreamRecords(event.Records)) {
+      try {
+        const disposition = await reconcileCheck(resolved, coords, nowMs);
+        log('check reconciled from stream', { ...coords, disposition });
+      } catch (err) {
+        // Never poison the stream on a state-table hiccup — the item stays
+        // unconverged and the next sweep picks it up.
+        log('stream reconcile failed; sweep will retry', {
+          ...coords,
+          error: (err as Error).message,
+        });
+      }
+    }
+    return;
+  }
+  const summary = await sweepChecks(resolved, nowMs);
+  log('check sweep complete', { ...summary });
+};

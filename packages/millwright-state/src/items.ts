@@ -165,18 +165,27 @@ export interface RegistryItem extends KeyedItem {
   readonly expiresAt?: never;
 }
 
-/** `CHECK#<repo>#<sha>` / `CTX#<context>` — reporter reconciliation state. */
+/**
+ * `CHECK#<repo>#<sha>` / `CTX#<context>` — reporter reconciliation state.
+ * Deciders upsert the desired side (conditional on the §13.2 ownership rule:
+ * the newest run owns the context); the reporter alone writes the reported
+ * side. Convergence is `reported === desired` on the canonical serialization.
+ */
 export interface CheckStateItem extends ExpiringItem {
   readonly repo: string;
   readonly sha: string;
   readonly context: string;
-  /** What the check should show (decider-written desired state). */
+  /** What the check should show (decider-written, serialized `DesiredCheckState`). */
   readonly desired?: string;
+  /** When `desired` was last written; anchors the 7-day abandonment clock. */
+  readonly desiredAt?: string;
   /** What GitHub last acknowledged (reporter-written). */
   readonly reported?: string;
   readonly checkRunId?: number;
   /** Run id that owns this context on this sha (§13.2 ownership rule). */
   readonly ownerRun?: string;
+  /** Owner's run number — the conditional-write comparand for `ownerRun`. */
+  readonly ownerRunNumber?: number;
   readonly backoffAttempts?: number;
   readonly nextAttemptAt?: string;
   /** Set when reconciliation gave up; surfaced by `doctor`, never retried. */
