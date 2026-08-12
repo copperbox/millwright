@@ -1,0 +1,24 @@
+{
+  "name": "millwright",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Millwright monorepo — polling-driven CI/CD in your own AWS account",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "vitest run",
+    "set-version": "node scripts/set-version.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
