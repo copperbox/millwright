@@ -8,12 +8,17 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { Boundary } from './boundary';
+import { BuildProject } from './build-project';
 import { DataStores } from './data-stores';
 import { MillwrightEventBus } from './event-bus';
 import { Launcher } from './launcher';
 import { Poller } from './poller';
 import { Reporter } from './reporter';
+import { RunExecutor } from './run-executor';
+import { ShimAssets } from './shim-assets';
+import { StepEventsWriter } from './step-events-writer';
 import { SynthJob } from './synth-job';
+import { Sweep } from './sweep';
 import { SUPPORTED_SCHEMA_VERSION, VERSION } from './version';
 
 const DEPLOYMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -100,6 +105,16 @@ export class Millwright extends Construct {
   readonly eventBus: MillwrightEventBus;
   /** C4 — the launcher consuming trigger events from the bus. */
   readonly launcher: Launcher;
+  /** C5–C7 — the run executor machine, decider, and build-events handler. */
+  readonly runExecutor: RunExecutor;
+  /** C11 — the single CodeBuild project every job runs on. */
+  readonly buildProject: BuildProject;
+  /** C13 — the step-shim delivery under the bucket's `control/shim/`. */
+  readonly shimAssets: ShimAssets;
+  /** C19 — the step-events writer projecting shim events into step rows. */
+  readonly stepEventsWriter: StepEventsWriter;
+  /** C16 — the 1-minute sweep repairing concurrency-group slots. */
+  readonly sweep: Sweep;
   /** C2 — the tier-1 SSH ls-refs poller and its tick schedule. */
   readonly poller: Poller;
   /** C8 — the reporter: sole owner of check reconciliation to GitHub. */
@@ -188,6 +203,35 @@ export class Millwright extends Construct {
       artifactBucket: this.artifactBucket,
       metadataRetention: this.metadataRetention,
     });
+    this.runExecutor = new RunExecutor(this, 'RunExecutor', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      artifactBucket: this.artifactBucket,
+      eventBusName: this.eventBus.busName,
+      metadataRetention: this.metadataRetention,
+    });
+    this.buildProject = new BuildProject(this, 'BuildProject', {
+      deploymentName: this.deploymentName,
+      artifactBucket: this.artifactBucket,
+      buildLogGroup: this.buildLogGroup,
+    });
+    this.shimAssets = new ShimAssets(this, 'ShimAssets', {
+      deploymentName: this.deploymentName,
+      artifactBucket: this.artifactBucket,
+    });
+    this.stepEventsWriter = new StepEventsWriter(this, 'StepEventsWriter', {
+      deploymentName: this.deploymentName,
+      bus: this.eventBus.bus,
+      stateTable: this.stateTable,
+      metadataRetention: this.metadataRetention,
+    });
+    this.sweep = new Sweep(this, 'Sweep', {
+      deploymentName: this.deploymentName,
+      stateTable: this.stateTable,
+      runExecutorArn: this.runExecutor.stateMachineArn,
+      metadataRetention: this.metadataRetention,
+    });
+
     this.poller = new Poller(this, 'Poller', {
       deploymentName: this.deploymentName,
       pollCadence: this.pollCadence,
@@ -228,6 +272,7 @@ export class Millwright extends Construct {
           pollingTable: stores.pollingTableName,
           artifactBucket: this.artifactBucket.bucketName,
           buildLogGroup: stores.buildLogGroupName,
+          buildProject: this.buildProject.projectName,
           configKeyArn: this.configKey.keyArn,
           configKeyAlias: stores.configKeyAlias,
           // The CLI's dispatch/bootstrap PutEvents target.

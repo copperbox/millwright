@@ -42,7 +42,12 @@ describe('permissionsBoundary', () => {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
     });
     expect(millwright.permissionsBoundaryArn).toBe(BOUNDARY_ARN);
-    Annotations.fromStack(stack).hasNoWarning('*', Match.anyValue());
+    // The shim delivery may warn when no SEA binaries were built in this
+    // checkout; only the boundary warning matters here.
+    Annotations.fromStack(stack).hasNoWarning(
+      '*',
+      Match.stringLikeRegexp('no permissions boundary'),
+    );
     Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
       PermissionsBoundary: BOUNDARY_ARN,
     });
@@ -85,6 +90,7 @@ describe('manifest parameter', () => {
         pollingTable: 'millwright-polling',
         artifactBucket: 'TOKEN',
         buildLogGroup: '/millwright/millwright/builds',
+        buildProject: 'millwright-builds',
         configKeyArn: 'TOKEN',
         configKeyAlias: 'alias/millwright/millwright',
         eventBus: 'millwright-bus',
@@ -141,6 +147,18 @@ describe('defaults', () => {
     expect(millwright.metadataRetention.toDays()).toBe(30);
     expect(millwright.artifactRetention.toDays()).toBe(60);
     expect(millwright.cacheRetention.toDays()).toBe(3);
+  });
+});
+
+describe('run executor wiring', () => {
+  it('deploys the state machine under the exact name the launcher pinned', () => {
+    const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
+    expect(millwright.runExecutor.stateMachineName).toBe(millwright.launcher.runExecutorName);
+  });
+
+  it('deploys the build project under the exact name the run executor pinned', () => {
+    const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
+    expect(millwright.buildProject.projectName).toBe(millwright.runExecutor.buildProjectName);
   });
 });
 

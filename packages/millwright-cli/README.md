@@ -127,6 +127,12 @@ the latest run is the default.
   run's job logs. `-f` tails via polled `GetLogEvents` (~2 s cadence),
   `--failed` narrows to failed jobs, `--full` dumps each stream from the
   beginning.
+- `millwright runs cancel <run> [--repo <owner/name>]` — request
+  cancellation: writes `cancelRequested` and wakes the decider if the run is
+  in flight, which stops in-flight builds and lands every job terminal.
+- `millwright runs rerun <run> [--repo <owner/name>] [--failed]` — create a
+  new run from the stored job model, no re-synth; `--failed` reruns only
+  failed jobs and their skipped dependents, reusing succeeded outputs.
 
 `millwright doctor` verifies the whole chain: the manifest, GitHub
 credentials (including a per-repo pull-request read probe), each repo's

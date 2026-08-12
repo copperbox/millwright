@@ -1,0 +1,42 @@
+#!/bin/sh
+# millwright step-shim dispatcher (spec S7.8, S11.2, C13).
+#
+# This file is the delivered entry point of the shim prefix: the rendered
+# buildspec invokes `sh ".../millwright-shim" ...` (through `sh` because S3
+# materialization strips execute bits). It picks the statically packaged
+# binary for the host architecture and execs it; when the delivery carries no
+# binary for this arch, it falls back to a `node` on PATH running the bundled
+# source. The contract for job images stays "Linux + POSIX shell, nothing
+# more" whenever the per-arch binaries were built (scripts/build-shim.mjs).
+set -u
+
+dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+case "$(uname -m)" in
+  x86_64 | amd64) target=linux-x64 ;;
+  aarch64 | arm64) target=linux-arm64 ;;
+  *) target='' ;;
+esac
+
+if [ -n "$target" ] && [ -f "$dir/millwright-shim-$target" ]; then
+  bin="$dir/millwright-shim-$target"
+  if [ -x "$bin" ]; then
+    exec "$bin" "$@"
+  fi
+  if chmod +x "$bin" 2>/dev/null; then
+    exec "$bin" "$@"
+  fi
+  # Read-only delivery (e.g. a ro bind-mount): run an executable copy.
+  tmp="${TMPDIR:-/tmp}/millwright-shim-$$"
+  if cp "$bin" "$tmp" 2>/dev/null && chmod +x "$tmp"; then
+    exec "$tmp" "$@"
+  fi
+fi
+
+if [ -f "$dir/millwright-shim.cjs" ] && command -v node >/dev/null 2>&1; then
+  exec node "$dir/millwright-shim.cjs" "$@"
+fi
+
+echo "millwright-shim: no packaged binary for $(uname -m) and no node on PATH;" \
+  'rebuild the shim delivery with scripts/build-shim.mjs --sea' >&2
+exit 69

@@ -1,7 +1,7 @@
 import type { SFNClient } from '@aws-sdk/client-sfn';
 import { RunItem, runKey, withMetadataTtl } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
-import { SfnExecutionStarter, executionName } from '../src/runtime/launcher/executions';
+import { SfnExecutionStarter, executionName } from '../src/runtime/shared/executions';
 
 const NOW = Date.parse('2026-08-12T06:00:00Z');
 
@@ -74,6 +74,18 @@ describe('SfnExecutionStarter', () => {
       ref: 'refs/heads/main',
       sha: 'c'.repeat(40),
       trigger: 'push',
+    });
+  });
+
+  it('starts rerun runs with resume: true — reruns never re-synth', async () => {
+    const { client, inputs } = fakeSfn();
+    const starter = new SfnExecutionStarter(client, 'arn:sm', () => {});
+    await starter.startRun({ ...run(43), trigger: 'rerun', rerunOf: 'octocat/app#ci#42' });
+    expect(JSON.parse(inputs[0].input)).toMatchObject({
+      action: 'run',
+      runId: 'octocat/app#ci#43',
+      trigger: 'rerun',
+      resume: true,
     });
   });
 

@@ -112,3 +112,14 @@ require the gating workflows' `<workflow> / synth` contexts (and whichever
 job contexts should gate) — not `millwright / synth`, which only
 bootstrap-only executions report. PAT-mode deployments report commit
 statuses under identical context names, so the same required contexts work.
+
+## Operating runs
+
+```sh
+millwright runs cancel <run>            # stop in-flight builds; every job lands terminal
+millwright runs rerun <run> [--failed]  # new run from the stored job model — no re-synth
+```
+
+`<run>` is `owner/name#workflow#number`, or `workflow#number` with
+`--repo <owner/name>`. `--failed` reruns only the failed jobs and their
+skipped dependents, reusing the source run's succeeded outputs.

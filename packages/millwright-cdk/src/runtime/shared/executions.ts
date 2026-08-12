@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import type { SFNClient } from '@aws-sdk/client-sfn';
 import { StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { RunItem, formatRunId } from '@copperbox/millwright-state';
-import { ExecutionStarter } from './launcher';
 
 /**
  * Step 7: `StartExecution` on the run executor, always under a deterministic,
@@ -18,6 +17,13 @@ import { ExecutionStarter } from './launcher';
  * jobs.
  */
 
+export interface ExecutionStarter {
+  /** Idempotent under a run-derived deterministic execution name. */
+  startRun(run: RunItem): Promise<void>;
+  /** Bootstrap synth-only execution, idempotently keyed by (repo, ref, sha). */
+  startSynthOnly(repo: string, ref: string, sha: string): Promise<void>;
+}
+
 export interface RunExecutionInput {
   readonly action: 'run';
   readonly runId: string;
@@ -28,6 +34,12 @@ export interface RunExecutionInput {
   readonly sha: string;
   readonly trigger: string;
   readonly inputs?: Readonly<Record<string, string | boolean>>;
+  /**
+   * Skip straight to the decider loop. Set on carry-over executions (synth
+   * already happened) and on reruns (the launcher prefix-copied the stored
+   * model — reruns never re-synth, spec §7.7).
+   */
+  readonly resume?: true;
 }
 
 export interface SynthOnlyExecutionInput {
@@ -66,6 +78,7 @@ export class SfnExecutionStarter implements ExecutionStarter {
       sha: run.sha,
       trigger: run.trigger,
       ...(run.inputs ? { inputs: run.inputs } : {}),
+      ...(run.rerunOf ? { resume: true as const } : {}),
     };
     await this.start(
       executionName('run', `${run.repo}-${run.workflow}-${run.runNumber}`, runId),

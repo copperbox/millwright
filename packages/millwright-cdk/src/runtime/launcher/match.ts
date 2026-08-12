@@ -110,19 +110,25 @@ function triggerMatches(trigger: NarrowedTrigger, event: ValidBusEvent): boolean
       return trigger.kind === 'cron';
     case 'dispatch':
       return trigger.kind === 'manual';
-    // bootstrap events route to the synth-only path before matching.
+    // bootstrap events route to the synth-only path before matching, and
+    // rerun events re-execute one named run without any trigger matching.
     case 'bootstrap':
+    case 'rerun':
       return false;
   }
+}
+
+/** The registry's workflow map, narrowed from its unknown stored shape. */
+function registryWorkflows(registry: RegistryItem): Record<string, unknown> {
+  return typeof registry.workflows === 'object' && registry.workflows !== null
+    ? registry.workflows
+    : {};
 }
 
 export function matchWorkflows(registry: RegistryItem, event: ValidBusEvent): MatchResult {
   const matched: MatchedWorkflow[] = [];
   const malformed: string[] = [];
-  const workflows =
-    typeof registry.workflows === 'object' && registry.workflows !== null
-      ? registry.workflows
-      : {};
+  const workflows = registryWorkflows(registry);
   for (const name of Object.keys(workflows).sort()) {
     // cron and dispatch events target one named workflow.
     if ((event.kind === 'cron' || event.kind === 'dispatch') && event.workflow !== name) {
@@ -140,6 +146,23 @@ export function matchWorkflows(registry: RegistryItem, event: ValidBusEvent): Ma
     }
   }
   return { matched, malformed };
+}
+
+/**
+ * One workflow's narrowed concurrency entry, for paths that bypass trigger
+ * matching (rerun): `undefined` = none declared (or no such workflow),
+ * `null` = declared but uninterpretable — callers must fail closed on null
+ * exactly like {@link matchWorkflows} does.
+ */
+export function workflowConcurrency(
+  registry: RegistryItem,
+  workflow: string,
+): MatchedWorkflow['concurrency'] | null | undefined {
+  const entry = registryWorkflows(registry)[workflow];
+  if (entry === undefined) {
+    return undefined;
+  }
+  return narrowConcurrency((entry as { concurrency?: unknown }).concurrency);
 }
 
 /**

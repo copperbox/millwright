@@ -3,6 +3,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ECRClient } from '@aws-sdk/client-ecr';
 import { EventBridgeClient } from '@aws-sdk/client-eventbridge';
 import { IAMClient } from '@aws-sdk/client-iam';
+import { SFNClient } from '@aws-sdk/client-sfn';
 import { ServiceQuotasClient } from '@aws-sdk/client-service-quotas';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
@@ -14,9 +15,9 @@ import {
   RunModelError,
 } from '@copperbox/millwright-state';
 import { Command } from 'commander';
-import { CommandError } from './config-plane';
+import { CommandError, requireManifestResource } from './config-plane';
 import { DefinitionLoadError } from './definition-loader';
-import { DEPLOYMENT_ENV_VAR, DiscoveryError } from './discovery';
+import { DEPLOYMENT_ENV_VAR, Deployment, DiscoveryError, discoverDeployment } from './discovery';
 import { DispatchError, createDispatchDeps, dispatch } from './dispatch';
 import { DoctorDeps, doctor } from './doctor';
 import { GitProtocolError } from './git/ls-refs';
@@ -31,7 +32,16 @@ import { createGitRunner } from './local/source-archive';
 import { LogsDeps, logs } from './logs';
 import { promptLine, promptSecret, waitForOperator } from './prompts';
 import { RepoDeps, repoAdd, repoList, repoRemove, repoUpdate } from './repo';
-import { RunsDeps, runsList, runsShow, runsShowLocal } from './runs';
+import {
+  RunsCommandError,
+  RunsDeps,
+  cancelRun,
+  rerunRun,
+  resolveRunRef,
+  runsList,
+  runsShow,
+  runsShowLocal,
+} from './runs';
 import { secretsSet } from './secrets';
 import { SetupDeps, refreshHostKeys, setup } from './setup';
 import { DEFAULT_ENTRY, runSynthCommand } from './synth-command';
@@ -42,7 +52,9 @@ function output(line: string): void {
 }
 
 function docClient(): DynamoDBDocumentClient {
-  return DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  return DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+    marshallOptions: { removeUndefinedValues: true },
+  });
 }
 
 function awsRegion(): string | undefined {
@@ -388,7 +400,7 @@ export function buildProgram(): Command {
       );
     });
 
-  const runs = program.command('runs').description('inspect runs recorded in the state table');
+  const runs = program.command('runs').description('operate on and inspect cloud runs');
 
   runs
     .command('list')
@@ -411,6 +423,60 @@ export function buildProgram(): Command {
         return;
       }
       await runsShow(runsDeps(), { run, explicitName: program.opts().deployment });
+    });
+
+  runs
+    .command('cancel')
+    .description(
+      'request cancellation: the decider stops in-flight builds and lands every job terminal',
+    )
+    .argument('<run>', 'workflow#number (with --repo) or owner/name#workflow#number')
+    .option('--repo <owner/name>', 'repo scoping a workflow#number reference')
+    .action(async (runRef: string, options: { repo?: string }) => {
+      const deployment = await discover(program);
+      const coords = resolveRunRef(runRef, options.repo);
+      const result = await cancelRun(
+        {
+          dynamo: docClient(),
+          sfn: new SFNClient({}),
+          tableName: requireManifestResource(deployment, 'stateTable', 'state table'),
+        },
+        coords,
+      );
+      if (!result.requested) {
+        process.stdout.write(`Run ${result.runId} already finished ${result.status}.\n`);
+        return;
+      }
+      process.stdout.write(
+        `Cancellation requested for ${result.runId}` +
+          (result.woke ? ' (decider woken).\n' : ' (the decider picks it up within a minute).\n'),
+      );
+    });
+
+  runs
+    .command('rerun')
+    .description('create a new run from the stored job model — no re-synth')
+    .argument('<run>', 'workflow#number (with --repo) or owner/name#workflow#number')
+    .option('--repo <owner/name>', 'repo scoping a workflow#number reference')
+    .option('--failed', 'rerun failed jobs and their skipped dependents, reusing succeeded outputs')
+    .action(async (runRef: string, options: { repo?: string; failed?: boolean }) => {
+      const deployment = await discover(program);
+      const coords = resolveRunRef(runRef, options.repo);
+      const result = await rerunRun(
+        {
+          dynamo: docClient(),
+          events: new EventBridgeClient({}),
+          tableName: requireManifestResource(deployment, 'stateTable', 'state table'),
+          busName: requireManifestResource(deployment, 'eventBus', 'event bus'),
+        },
+        coords,
+        { failed: options.failed === true },
+      );
+      process.stdout.write(
+        `Rerun requested for ${result.sourceRunId}` +
+          (result.failedOnly ? ' (failed jobs only; succeeded outputs reused).' : '.') +
+          ' Watch it with: millwright runs list\n',
+      );
     });
 
   program
@@ -457,8 +523,13 @@ export function buildProgram(): Command {
   return program;
 }
 
+function discover(program: Command): Promise<Deployment> {
+  return discoverDeployment(new SSMClient({}), { explicitName: program.opts().deployment });
+}
+
 const USER_FACING_ERRORS = [
   DiscoveryError,
+  RunsCommandError,
   CommandError,
   GithubApiError,
   HostKeyMismatchError,

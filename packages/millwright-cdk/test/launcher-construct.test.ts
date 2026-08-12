@@ -27,7 +27,7 @@ describe('launcher wiring (C4)', () => {
     template.hasResourceProperties('AWS::Events::Rule', {
       EventPattern: {
         source: ['millwright.poller', 'millwright.cli'],
-        'detail-type': ['push', 'branch', 'tag', 'pr', 'cron', 'dispatch', 'bootstrap'],
+        'detail-type': ['push', 'branch', 'tag', 'pr', 'cron', 'dispatch', 'bootstrap', 'rerun'],
       },
       Targets: [Match.objectLike({ Arn: Match.anyValue() })],
     });
@@ -52,6 +52,7 @@ describe('launcher wiring (C4)', () => {
               Match.arrayWith([Match.stringLikeRegexp(':stateMachine:ci-run-executor')]),
             ]),
           }),
+          ARTIFACT_BUCKET_NAME: Match.anyValue(),
           METADATA_RETENTION_DAYS: '90',
         }),
       },
