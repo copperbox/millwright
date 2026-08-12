@@ -1,6 +1,6 @@
 {
   "name": "@copperbox/millwright-cdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The Millwright CDK construct — deploys the millwright control plane into your AWS account",
   "license": "MIT",
   "repository": {

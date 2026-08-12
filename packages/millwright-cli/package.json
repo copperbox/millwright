@@ -1,6 +1,6 @@
 {
   "name": "@copperbox/millwright-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "millwright CLI — operate a millwright deployment from operator and developer machines",
   "license": "MIT",
   "repository": {
