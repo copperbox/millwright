@@ -56,3 +56,41 @@ the App token carries REST-only work. Flags:
 `repo update` changes any of those (unspecified flags keep their values),
 `repo list` shows the configured repos, and `repo remove` deletes the
 config + key parameters and best-effort removes the GitHub-side deploy key.
+
+## Observability
+
+The state table is the CLI's source of truth — there is no web UI. Runs are
+named `<workflow>#<number>` (`ci#142`), qualified as `owner/repo/ci#142` when
+two watched repos share a workflow name. Wherever a run argument is optional,
+the latest run is the default.
+
+- `millwright runs list [--workflow <wf>] [--ref <ref>] [--status <s>]` —
+  recent runs, newest first.
+- `millwright runs show [<run>]` — one run's jobs and steps, including job
+  reuse, skip reasons, supersession, and abandoned check reporting, with
+  CloudWatch deep links to each job's logs.
+- `millwright logs [-f] [<run>] [--job <name>] [--failed] [--full]` — print a
+  run's job logs. `-f` tails via polled `GetLogEvents` (~2 s cadence),
+  `--failed` narrows to failed jobs, `--full` dumps each stream from the
+  beginning.
+
+`millwright doctor` verifies the whole chain: the manifest, GitHub
+credentials (including a per-repo pull-request read probe), each repo's
+deploy key over SSH, poller health, and registry priming — a repo that is
+being polled but has no default-branch registry entry is a hard failure
+naming the bootstrap remedy. It also reports CodeBuild concurrency and IAM
+role quotas, and best-effort checks ECR resource policies and the branch
+rulesets protecting `secretsAllowedRefs`. Exits non-zero when any check
+fails.
+
+## Secrets and host keys
+
+`millwright secrets set <name> [--scope <scope>]` prompts for the value
+(never echoed) and writes `/millwright/<deployment>/secrets/<scope>/<name>`
+as a SecureString under the deployment CMK. The scope defaults to the repo of
+the working directory's `origin` remote; secrets flow only to runs on refs
+matched by the repo's `secretsAllowedRefs`.
+
+`millwright refresh-host-keys` re-pins GitHub's SSH host keys from the
+`/meta` endpoint — the manual hatch for confirmed key rotations. The poller
+honors the new pins on its next tick.

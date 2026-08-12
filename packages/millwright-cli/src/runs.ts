@@ -146,7 +146,12 @@ export async function runsList(deps: RunsDeps, options: RunsListOptions = {}): P
       runs.push(run);
     }
   }
-  runs.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  runs.sort((a, b) => {
+    if (a.createdAt === b.createdAt) {
+      return 0;
+    }
+    return a.createdAt < b.createdAt ? 1 : -1;
+  });
   const shown = runs.slice(0, limit);
 
   if (shown.length === 0) {

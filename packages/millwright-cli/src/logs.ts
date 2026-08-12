@@ -10,7 +10,7 @@ import { GetLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
 import { JobItem, JobStatus, RunItem } from '@copperbox/millwright-state';
 import { CommandError, requireManifestResource } from './config-plane';
 import { DiscoverOptions, SsmClientLike } from './discovery';
-import { formatRunId, resolveRun } from './run-ref';
+import { StateReadContext, formatRunId, resolveRun } from './run-ref';
 import { makeStateReadContext } from './runs';
 import { DynamoDocClientLike, getRun, listRunDetail } from './state-reads';
 
@@ -137,11 +137,11 @@ async function dump(
 
 async function follow(
   deps: LogsDeps,
+  context: StateReadContext,
   logGroup: string,
   run: RunItem,
   options: LogsOptions,
 ): Promise<void> {
-  const context = await makeStateReadContext(deps.ssm, deps.ddb, options);
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const interval = deps.pollIntervalMs ?? 2_000;
   // Streams we started watching mid-run begin at the tail; streams that
@@ -197,7 +197,7 @@ export async function logs(deps: LogsDeps, options: LogsOptions = {}): Promise<v
   const run = await resolveRun(context, options.run);
 
   if (options.follow) {
-    await follow(deps, logGroup, run, options);
+    await follow(deps, context, logGroup, run, options);
     return;
   }
   const { jobs } = await listRunDetail(context.ddb, context.stateTable, run);

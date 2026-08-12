@@ -516,6 +516,7 @@ export async function doctor(deps: DoctorDeps, options: DiscoverOptions = {}): P
   });
 
   const rawPins = await getOptionalParameter(deps.ssm, hostKeysParameterName(deployment.name));
+  const hostKeyPins = rawPins === undefined ? [] : parseHostKeyPins(rawPins);
   if (rawPins === undefined) {
     checks.add(
       'host-keys',
@@ -524,9 +525,8 @@ export async function doctor(deps: DoctorDeps, options: DiscoverOptions = {}): P
         'or "millwright refresh-host-keys"',
     );
   } else {
-    checks.add('host-keys', 'ok', `${parseHostKeyPins(rawPins).length} GitHub host keys pinned`);
+    checks.add('host-keys', 'ok', `${hostKeyPins.length} GitHub host keys pinned`);
   }
-  const hostKeyPins = rawPins === undefined ? [] : parseHostKeyPins(rawPins);
 
   if (repos.length === 0) {
     checks.add('repos', 'info', 'no repos configured — "millwright repo add <owner/repo>" to watch one');
