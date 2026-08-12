@@ -8,7 +8,7 @@ Spec: [`docs/specs/1-millwright-v1-implementable-specification.md`](docs/specs/1
 
 ## Packages
 
-npm workspace with three packages under the `@copperbox` scope, released in
+npm workspace with four packages under the `@copperbox` scope, released in
 lockstep with a single version:
 
 | Package | What | Installed where |
@@ -16,6 +16,7 @@ lockstep with a single version:
 | [`@copperbox/millwright-workflows`](packages/millwright-workflows) | Workflow definition library. Zero dependencies — never pulls in `aws-cdk-lib`. | The only install in watched repos. |
 | [`@copperbox/millwright-cdk`](packages/millwright-cdk) | The `Millwright` construct that deploys the control plane. | The operator's CDK app. |
 | [`@copperbox/millwright-cli`](packages/millwright-cli) | `millwright` binary (npx-able). | Operator + developer machines. |
+| [`@copperbox/millwright-state`](packages/millwright-state) | Shared data-plane helpers: state/polling table keys, SSM config-plane paths, S3 layout. | A dependency of the CDK and CLI packages, not installed directly. |
 
 ## Developing
 
@@ -26,7 +27,7 @@ npm test
 npm run build
 ```
 
-Releases bump every package to one version, then publish all three:
+Releases bump every package to one version, then publish them all:
 
 ```sh
 npm run set-version -- 0.2.0

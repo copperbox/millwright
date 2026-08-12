@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @copperbox/millwright-workflows --workspace @copperbox/millwright-cdk --workspace @copperbox/millwright-cli",
+    "build": "npm run build --workspace @copperbox/millwright-state --workspace @copperbox/millwright-workflows --workspace @copperbox/millwright-cdk --workspace @copperbox/millwright-cli",
     "typecheck": "npm run typecheck --workspaces",
     "test": "vitest run",
     "set-version": "node scripts/set-version.mjs"

@@ -6,6 +6,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@copperbox/millwright-state': path.resolve(
+        __dirname,
+        'packages/millwright-state/src/index.ts',
+      ),
       '@copperbox/millwright-workflows': path.resolve(
         __dirname,
         'packages/millwright-workflows/src/index.ts',

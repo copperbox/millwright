@@ -13,6 +13,11 @@
     "sourceMap": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@copperbox/millwright-state": ["packages/millwright-state/src/index.ts"],
+      "@copperbox/millwright-workflows": ["packages/millwright-workflows/src/index.ts"]
+    }
   }
 }
