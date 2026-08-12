@@ -1,0 +1,38 @@
+{
+  "name": "@copperbox/millwright-cdk",
+  "version": "0.1.0",
+  "description": "The Millwright CDK construct — deploys the millwright control plane into your AWS account",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/copperbox/millwright.git",
+    "directory": "packages/millwright-cdk"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@copperbox/millwright-state": "^0.1.0"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.100.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
