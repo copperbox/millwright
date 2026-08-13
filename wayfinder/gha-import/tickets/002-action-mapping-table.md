@@ -49,8 +49,7 @@ linked from this ticket.
 ## Resolution
 
 Per-action mapping table with real shipped signatures. Asset on branch
-`research/gha-action-mapping` (commit `40ff338`),
-`wayfinder/gha-import/research/002-action-mapping.md`. Schemas read at today's current
+`research/gha-action-mapping`, `research/gha-action-mapping.md`. Schemas read at today's current
 majors, which are well ahead of what repos typically pin (checkout v7, cache v6,
 upload-artifact v7, download-artifact v8, setup-* v5–v7) — the importer must handle
 *pinned old* versions, not just current ones.

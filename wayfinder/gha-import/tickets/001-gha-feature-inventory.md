@@ -59,8 +59,8 @@ Deliverable: a disposition table capturing the whole schema, on a
 ## Resolution
 
 Disposition table for the whole GHA workflow schema: **~30 translate, ~45 hole,
-~14 drop**. Asset on branch `research/gha-feature-inventory` (commit `855f7b3`),
-`wayfinder/gha-import/findings/001-gha-feature-inventory.md`.
+~14 drop**. Asset on branch `research/gha-feature-inventory`,
+`research/gha-feature-inventory.md`.
 
 **Five shipped-code facts drive most dispositions**: `StepModel` is `{ run, skipIf? }`
 and nothing else (no name, id, env, shell, cwd, timeout, outputs); there is **no env

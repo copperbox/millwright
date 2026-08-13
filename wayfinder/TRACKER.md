@@ -44,3 +44,8 @@ It exists so planning survives GitHub outages — the very thing millwright is f
   Decisions so far.
 - **Assets** (research findings, prototypes) are committed on their own branches or files
   and linked from the ticket — never pasted into it.
+- **Asset layout** — research findings always live at the **repo root** in `research/`,
+  never under `wayfinder/`, and the filename matches the branch:
+  branch `research/<name>` → `research/<name>.md`. This holds across all maps, so a
+  ticket in any map links `research/<name>.md`. Prototypes follow the same rule under
+  `prototypes/<name>/`.
