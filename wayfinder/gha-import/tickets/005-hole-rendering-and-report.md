@@ -4,7 +4,7 @@ title: Hole rendering and the import report
 type: wayfinder:grilling
 status: open
 assignee: none
-blocked-by: ["001"]
+blocked-by: ["001", "012"]
 ---
 
 ## Question

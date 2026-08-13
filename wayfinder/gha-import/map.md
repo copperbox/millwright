@@ -80,18 +80,47 @@ translation target is the shipped API of `@copperbox/millwright-workflows`
 
 <!-- one line per closed ticket: gist + link -->
 
-_None yet — charted 2026-08-13._
+- [GHA feature inventory](tickets/001-gha-feature-inventory.md) — whole-schema
+  disposition table: **~30 translate, ~45 hole, ~14 drop**, grounded on five shipped-code
+  facts (`StepModel` is `{ run, skipIf? }`; no env concept anywhere; no expression
+  evaluator; no job outputs or conditions; steps share no shell state). All five
+  predicted structural impossibilities confirmed, **twelve more found** — step
+  identity/`$GITHUB_OUTPUT`, `$GITHUB_ENV`, `services:`, deployment `environment:` (can
+  silently remove a **production approval gate**), job-level `concurrency`, *all* trigger
+  filtering (`Trigger.pullRequest()` takes no arguments), free-text dispatch inputs, cron
+  `timezone:`, the event surface beyond `TriggerKind`'s 5, matrix scheduling, non-Linux
+  runners, container tuning. Corrections: **matrix is not a hole** (static matrices
+  unroll at codegen); `skipIf` is not a drop-in for step `if:` (inverted, shell-not-
+  expression, runs *before* the step, so `if: failure()` is dead); workflow names cannot
+  contain spaces. Asset: branch `research/gha-feature-inventory`. Spawned
+  [Behavior-drift contract](tickets/012-behavior-drift-contract.md).
+- [Action mapping table](tickets/002-action-mapping-table.md) — per-action targets
+  against real shipped signatures. `checkout` → deleted, **but `source.tar.gz` carries no
+  repository at all** (`.git` excluded), so even default `fetch-depth: 1` is unreproduced
+  and the rule becomes *delete, then scan `run:` steps for git*; `configure-aws-credentials`
+  → deleted, but `aws-region` **cannot be set at all** (`AWS_` is a reserved prefix, no
+  cross-step env) — a cross-region parity break; `setup-*` → `image`, with its `cache:`
+  sub-input **untranslatable** (every default cache dir is outside the workspace);
+  `cache` → `Cache.keyed` (key becomes an array of fragments, may not contain `/`, **one
+  cache per job**); `upload-artifact` → `produces` (**`if-no-files-found: warn` becomes a
+  job failure**); `download-artifact` → `consumes`, which takes an **`ArtifactRef`, not a
+  name**, forcing topologically-ordered, variable-bound job emission. Asset: branch
+  `research/gha-action-mapping`. Spawned
+  [Behavior-drift contract](tickets/012-behavior-drift-contract.md).
 
 ## Not yet specified
 
 <!-- Per Note 8, every item here must be cleared before the spec is assembled. -->
 
 - **Composite action translation depth** — in-repo `./.github/actions/*` composite
-  actions are visible to the importer (unlike marketplace actions) and could be
-  inlined as steps. The question is *how deep*: nested composites, their `inputs:`
-  defaults, and their own `uses:` steps. Sharpens once
-  [GHA feature inventory](tickets/001-gha-feature-inventory.md) reports how they're
-  actually used.
+  actions are visible to the importer (unlike marketplace actions) and could be inlined
+  as steps. **Sharpened by [GHA feature inventory](tickets/001-gha-feature-inventory.md)**:
+  the schema yields a decidable predicate (`using: composite` ∧ all steps `run:`-or-
+  curated ∧ no `outputs`), so the answer trends toward *inline while the predicate holds*
+  rather than a fixed depth — composite `outputs` being the usual reason one won't
+  inline. Still fog because usage *frequency* is a corpus question desk research can't
+  answer. [Shared-workflow inlining](tickets/007-shared-workflow-inlining.md) owns the
+  call on whether this graduates into that ticket or its own.
 - **Re-import and drift** — "one-shot" is the intent, but reality is import → edit →
   upstream YAML changes. Whether the importer detects drift, supports a second pass,
   or refuses on an existing `millwright/workflows.ts` is undecided. Interacts with

@@ -2,7 +2,7 @@
 id: "001"
 title: GHA feature inventory
 type: wayfinder:research
-status: open
+status: closed
 assignee: research-subagent
 blocked-by: []
 ---
@@ -55,3 +55,54 @@ YAML at all**.
 
 Deliverable: a disposition table capturing the whole schema, on a
 `research/gha-feature-inventory` branch, linked from this ticket.
+
+## Resolution
+
+Disposition table for the whole GHA workflow schema: **~30 translate, ~45 hole,
+~14 drop**. Asset on branch `research/gha-feature-inventory` (commit `855f7b3`),
+`wayfinder/gha-import/findings/001-gha-feature-inventory.md`.
+
+**Five shipped-code facts drive most dispositions**: `StepModel` is `{ run, skipIf? }`
+and nothing else (no name, id, env, shell, cwd, timeout, outputs); there is **no env
+concept anywhere** in `millwright-workflows`; no expression evaluator (the only
+build-time value is the `steps: (inputs) => [...]` factory arg, resolved at synth);
+`JobModel` has no outputs and no conditions; steps share no shell state.
+
+All five structurally-impossible items predicted at charting confirmed. **Twelve more
+found**: step identity and step outputs (`$GITHUB_OUTPUT` — *intra*-job flow, which
+shell cannot paper over since steps share no state); cross-step env export
+(`$GITHUB_ENV`, `$GITHUB_PATH`); service containers; **deployment `environment:`** —
+the only hole that can silently remove a **human approval gate on production**;
+job-level `concurrency` (`ConcurrencyModel` is workflow-scoped); **all trigger
+filtering** — `Trigger.pullRequest()` takes no arguments at all, so every PR filter is
+lost; free-text/numeric dispatch inputs (`ManualInput` is choice-or-boolean, but
+`type: string` is GHA's *default*); cron `timezone:` (UTC-only — silently shifts every
+fire time); the webhook event surface beyond `TriggerKind`'s closed 5-member union;
+matrix scheduling (`fail-fast`, `max-parallel`); non-Linux runners; container tuning.
+
+**Corrections to charting's assumptions:**
+- **Matrix is not a hole.** Static matrices unroll into N generated `job()` calls at
+  codegen. Only `fromJSON(needs.x.outputs.y)` matrices and the scheduling knobs are
+  impossible. [Job DAG reconstruction](006-job-dag-reconstruction.md) holds as written.
+- **`skipIf` is not a drop-in for step `if:`** — inverted polarity *and* it takes a
+  shell command rather than an expression *and* it runs **before** the step, so it
+  cannot see prior status. This kills the `if: failure()` cleanup idiom outright.
+- **Workflow names cannot contain spaces** (`^[a-z0-9][a-z0-9._-]*$`), so
+  `name: Build and Test` must be slugged — constrains
+  [Generated code shape](008-generated-code-shape.md).
+- `github.sha`/`ref`/`repository`/`run_id`/`job` are translatable via `$MILLWRIGHT_*`,
+  set on every job container in cloud and local — but these are **control-plane
+  internals, not public API**. Whether the importer may depend on them is left as a
+  decision for [Expression and conditional translation](004-expression-translation.md).
+- **Composite actions**: the schema yields a decidable predicate (`using: composite` ∧
+  all steps `run:`-or-curated ∧ no `outputs`), so the map's fog item resolves toward
+  "inline while the predicate holds" rather than a fixed depth. Composite `outputs` are
+  the most common reason one will not inline. Usage *frequency* is a corpus question
+  desk research cannot answer.
+
+Routed downstream: holes cluster around **three root absences**, so
+[Hole rendering and the import report](005-hole-rendering-and-report.md) should group
+by root cause rather than per line; and "translate" leans heavily on generated shell,
+which sets expectations for [Generated code shape](008-generated-code-shape.md).
+
+Surfaced [Behavior-drift contract](012-behavior-drift-contract.md).

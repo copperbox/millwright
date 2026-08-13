@@ -18,6 +18,20 @@ GitHub's accidents shape millwright's surface. But the importer is an excellent
 stress test — translating real-world GHA workflows finds real holes, and those findings
 are worth capturing while they're fresh.
 
+**Start from the research assets** — both closed research tickets collected far more
+than charting anticipated: branch `research/gha-feature-inventory` (twelve
+structural impossibilities beyond the known list) and branch `research/gha-action-mapping`
+(§7 collects twelve cross-cutting candidates, including the plumbing oddity that
+`Step.run` has no `name` while `RunModelStep` carries one and the buildspec already
+renders `--name`). Notable additions to the list below: **no step identity or step
+outputs** (`$GITHUB_OUTPUT` — intra-job flow), **no cross-step env** (`$GITHUB_ENV`),
+**no service containers**, **no deployment environments / approval gates**, **no
+job-level concurrency**, **no trigger filtering of any kind**, **`ManualInput` is
+choice-or-boolean only** while `type: string` is GHA's default, **cron is UTC-only**,
+**multi-path artifacts are a definition-API-only gap** (`ArtifactModel.paths` and the
+shim already support them), and **`AWS_` being a reserved env prefix** makes
+`aws-region` unsettable by any means.
+
 Known before this ticket starts (confirm, sharpen, and add to):
 
 - **No non-secret config surface.** `JobProps` is

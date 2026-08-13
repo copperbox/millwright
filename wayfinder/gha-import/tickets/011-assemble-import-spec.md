@@ -4,7 +4,7 @@ title: Assemble the import spec
 type: wayfinder:task
 status: open
 assignee: none
-blocked-by: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010"]
+blocked-by: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "012"]
 ---
 
 ## Question
