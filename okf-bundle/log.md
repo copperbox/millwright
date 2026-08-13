@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-08-13
+* **Update**: Updated [Deferred and out of scope for v1](/deferred-and-out-of-scope.md).
+
 ## 2026-08-12
 * Fix spec citation path
 * **Creation**: Created [Deferred and out of scope for v1](/deferred-and-out-of-scope.md).
