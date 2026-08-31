@@ -8,6 +8,7 @@ import { App, Stack } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import cdkPkg from '../package.json';
 import { ShimAssets, stageShimDelivery } from '../src';
 
 const sh = promisify(execFile);
@@ -81,6 +82,16 @@ describe('stageShimDelivery', () => {
       .map((line) => JSON.parse(line));
     expect(events).toHaveLength(1);
     expect(events[0].detail).toMatchObject({ status: 'SKIPPED', reason: 'skip_if' });
+  });
+});
+
+describe('release build', () => {
+  it('the package build script produces the SEA shim delivery', () => {
+    // The documented release recipe runs `npm run build` and nothing else
+    // before publishing — if build does not invoke build:shim, published
+    // packages ship without dist/shim and every npm-installed deployment
+    // degrades to the node-on-PATH fallback.
+    expect(cdkPkg.scripts.build).toContain('npm run build:shim');
   });
 });
 
