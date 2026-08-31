@@ -44,14 +44,18 @@ async function originRepo(): Promise<string | undefined> {
   return url ? parseGithubRemote(url) : undefined;
 }
 
-/** Secrets become environment variables in job shells (spec §11.2). */
-const SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/**
+ * The parameter-name shape `secretParameterName` accepts: one SSM path
+ * segment. The env var a secret lands in is named by the workflow's record
+ * key, not by this parameter name, so kebab-case is fine here.
+ */
+const SECRET_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
 export async function secretsSet(deps: SecretsDeps, options: SecretsSetOptions): Promise<void> {
   if (!SECRET_NAME_PATTERN.test(options.name)) {
     throw new CommandError(
-      `"${options.name}" is not a secret name — secrets surface as environment variables, ` +
-        'so names must match [A-Za-z_][A-Za-z0-9_]*',
+      `"${options.name}" is not a secret name — it becomes one segment of the secret's ` +
+        'SSM parameter path, so it must match [A-Za-z0-9_.-]+ (no "/")',
     );
   }
   const deployment = await discoverDeployment(deps.ssm, options);
