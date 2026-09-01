@@ -93,6 +93,12 @@ describe('release build', () => {
     // degrades to the node-on-PATH fallback.
     expect(cdkPkg.scripts.build).toContain('npm run build:shim');
   });
+
+  it('prepack rebuilds the SEA shim delivery at the publish boundary', () => {
+    // A bare `npm publish` or `npm pack` that skips the documented recipe
+    // still has to ship the binaries; prepack is the hook npm runs for both.
+    expect(cdkPkg.scripts.prepack).toContain('npm run build:shim');
+  });
 });
 
 describe('shim assets construct (C13)', () => {

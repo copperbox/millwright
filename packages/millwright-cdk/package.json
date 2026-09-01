@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run build:shim",
     "build:shim": "node scripts/build-shim.mjs --sea linux-x64,linux-arm64",
+    "prepack": "npm run build:shim",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
