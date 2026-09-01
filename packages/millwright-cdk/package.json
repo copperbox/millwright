@@ -1,6 +1,6 @@
 {
   "name": "@copperbox/millwright-cdk",
-  "version": "0.4.0",
+  "version": "0.6.1",
   "description": "The Millwright CDK construct — deploys the millwright control plane into your AWS account",
   "license": "MIT",
   "repository": {
@@ -22,9 +22,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@copperbox/millwright-cli": "^0.4.0",
-    "@copperbox/millwright-state": "^0.4.0",
-    "@copperbox/millwright-workflows": "^0.4.0",
+    "@copperbox/millwright-cli": "^0.6.1",
+    "@copperbox/millwright-state": "^0.6.1",
+    "@copperbox/millwright-workflows": "^0.6.1",
     "esbuild": "^0.28.0",
     "ssh2": "^1.17.0"
   },

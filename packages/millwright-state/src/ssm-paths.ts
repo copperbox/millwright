@@ -79,6 +79,15 @@ export function hostKeysParameterName(deploymentName: string): string {
 }
 
 /**
+ * Whether `name` can be the final segment of a secret parameter path: one
+ * non-empty SSM path segment, no `/`. The single owner of the rule callers
+ * (like `millwright secrets set`) pre-check before touching the deployment.
+ */
+export function isSecretNameSegment(name: string): boolean {
+  return /^[A-Za-z0-9_.-]+$/.test(name);
+}
+
+/**
  * SecureString — one workflow secret. `scope` defaults to the repo at the
  * call sites that resolve `Secret` references; it is explicit here.
  */
@@ -88,9 +97,10 @@ export function secretParameterName(
   secretName: string,
 ): string {
   assertPathSegment('scope', scope);
-  assertPathSegment('secret name', secretName);
-  if (secretName.includes('/')) {
-    throw new Error(`secret name must not contain "/", got "${secretName}"`);
+  if (!isSecretNameSegment(secretName)) {
+    throw new Error(
+      `secret name must be non-empty, contain only [A-Za-z0-9_.-] and no "/", got "${secretName}"`,
+    );
   }
   return `${configPlaneRoot(deploymentName)}/secrets/${scope}/${secretName}`;
 }

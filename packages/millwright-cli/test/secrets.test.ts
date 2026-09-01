@@ -41,12 +41,18 @@ describe('secrets set', () => {
     await expect(secretsSet(deps, { name: 'NPM_TOKEN' })).rejects.toThrow(/pass --scope/);
   });
 
-  it('rejects names that cannot be environment variables', async () => {
+  it('accepts kebab-case parameter names as the docs use', async () => {
+    const { ssm, deps } = fixture();
+    await secretsSet(deps, { name: 'npm-token', scope: 'acme/api' });
+    expect(ssm.parameters.has('/millwright/prod/secrets/acme/api/npm-token')).toBe(true);
+  });
+
+  it('rejects names that cannot be SSM path segments', async () => {
     const { deps } = fixture();
     await expect(secretsSet(deps, { name: 'not/a/name', scope: 'acme/api' })).rejects.toThrow(
       CommandError,
     );
-    await expect(secretsSet(deps, { name: '1BAD', scope: 'acme/api' })).rejects.toThrow(CommandError);
+    await expect(secretsSet(deps, { name: '', scope: 'acme/api' })).rejects.toThrow(CommandError);
   });
 
   it('refuses an empty value', async () => {

@@ -28,6 +28,11 @@ for (const dir of packageDirs) {
   const manifestPath = join(root, dir, 'package.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   manifest.version = version;
+  for (const block of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    for (const dep of Object.keys(manifest[block] ?? {})) {
+      if (dep.startsWith('@copperbox/millwright-')) manifest[block][dep] = `^${version}`;
+    }
+  }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`${manifest.name} -> ${version}`);
 
