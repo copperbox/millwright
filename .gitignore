@@ -1,4 +1,5 @@
 node_modules/
 dist/
+.shim-cache/
 cdk.out/
 *.tsbuildinfo
