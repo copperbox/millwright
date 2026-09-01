@@ -1,6 +1,6 @@
 {
   "name": "millwright",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "Millwright monorepo — polling-driven CI/CD in your own AWS account",
   "license": "MIT",
