@@ -8,7 +8,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { secretParameterName } from '@copperbox/millwright-state';
+import { isSecretNameSegment, secretParameterName } from '@copperbox/millwright-state';
 import { CommandError, configKeyId, putSecureStringParameter } from './config-plane';
 import { DiscoverOptions, SsmClientLike, discoverDeployment } from './discovery';
 
@@ -44,15 +44,11 @@ async function originRepo(): Promise<string | undefined> {
   return url ? parseGithubRemote(url) : undefined;
 }
 
-/**
- * The parameter-name shape `secretParameterName` accepts: one SSM path
- * segment. The env var a secret lands in is named by the workflow's record
- * key, not by this parameter name, so kebab-case is fine here.
- */
-const SECRET_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
-
 export async function secretsSet(deps: SecretsDeps, options: SecretsSetOptions): Promise<void> {
-  if (!SECRET_NAME_PATTERN.test(options.name)) {
+  // Pre-flight the shape `secretParameterName` accepts, before discovery and
+  // the value prompt. The env var a secret lands in is named by the
+  // workflow's record key, not by this parameter name, so kebab-case is fine.
+  if (!isSecretNameSegment(options.name)) {
     throw new CommandError(
       `"${options.name}" is not a secret name — it becomes one segment of the secret's ` +
         'SSM parameter path, so it must match [A-Za-z0-9_.-]+ (no "/")',
