@@ -4,6 +4,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { describe, expect, it } from 'vitest';
 import { Boundary, Millwright, MillwrightProps, SUPPORTED_SCHEMA_VERSION, VERSION } from '../src';
 import cdkPkg from '../package.json';
+import rootPkg from '../../../package.json';
 
 const BOUNDARY_ARN = 'arn:aws:iam::123456789012:policy/team-boundary';
 
@@ -165,5 +166,11 @@ describe('run executor wiring', () => {
 describe('lockstep version', () => {
   it('keeps the embedded VERSION in sync with package.json', () => {
     expect(VERSION).toBe(cdkPkg.version);
+  });
+
+  it('keeps the package version in sync with the root manifest', () => {
+    // A hand-edited bump that skips `npm run set-version` moves the root
+    // manifest alone; comparing against it catches the divergence.
+    expect(cdkPkg.version).toBe(rootPkg.version);
   });
 });
