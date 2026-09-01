@@ -176,6 +176,7 @@ export {
   deploymentNameFromManifestParameter,
   githubAppParameterName,
   hostKeysParameterName,
+  isSecretNameSegment,
   manifestParameterName,
   repoConfigParameterName,
   repoFromConfigParameterName,
