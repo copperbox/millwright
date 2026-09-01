@@ -94,10 +94,11 @@ describe('release build', () => {
     expect(cdkPkg.scripts.build).toContain('npm run build:shim');
   });
 
-  it('prepack rebuilds the SEA shim delivery at the publish boundary', () => {
+  it('prepack runs the full build at the publish boundary', () => {
     // A bare `npm publish` or `npm pack` that skips the documented recipe
-    // still has to ship the binaries; prepack is the hook npm runs for both.
-    expect(cdkPkg.scripts.prepack).toContain('npm run build:shim');
+    // still has to ship compiled JS and the binaries; prepack is the hook npm
+    // runs for both, and `build` is the one definition of a complete build.
+    expect(cdkPkg.scripts.prepack).toBe('npm run build');
   });
 });
 
