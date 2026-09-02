@@ -213,7 +213,10 @@ function manualInputDeclarations(
   return declared;
 }
 
-/** Validate and coerce raw `k=v` inputs against the declaration; apply defaults, fail on missing required choices. */
+/**
+ * Validate and coerce raw `k=v` inputs against the declaration, apply defaults,
+ * and fail on a choice input that has neither.
+ */
 function typeInputs(
   raw: Record<string, string>,
   declared: Record<string, DeclaredInput>,
