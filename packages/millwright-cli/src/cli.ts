@@ -542,11 +542,27 @@ const USER_FACING_ERRORS = [
   DispatchError,
 ];
 
+/**
+ * The code a command action signalled through `process.exitCode`, or 0. The
+ * synth and run actions report failure this way rather than by throwing, so
+ * `main` must hand it back instead of letting the caller overwrite it with 0.
+ */
+function signalledExitCode(): number {
+  const code = process.exitCode;
+  if (typeof code === 'number') {
+    return code;
+  }
+  if (typeof code === 'string') {
+    return Number.parseInt(code, 10) || 0;
+  }
+  return 0;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   const program = buildProgram();
   try {
     await program.parseAsync(argv as string[]);
-    return 0;
+    return signalledExitCode();
   } catch (err) {
     if (USER_FACING_ERRORS.some((kind) => err instanceof kind)) {
       process.stderr.write(`millwright: ${(err as Error).message}\n`);
