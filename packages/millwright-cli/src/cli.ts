@@ -535,6 +535,11 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
   return { program, exitCode: () => signal.code };
 }
 
+/**
+ * The command tree, for introspection (help text, structural tests). Exit
+ * codes signalled by the `synth` and `run` actions are not observable through
+ * this program; call `main()` if you need the effective exit code.
+ */
 export function buildProgram(): Command {
   return buildProgramWithSignal().program;
 }
