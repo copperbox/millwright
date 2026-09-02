@@ -55,7 +55,6 @@ function synth(entry: string): Promise<number> {
 }
 
 beforeEach(() => {
-  process.exitCode = undefined;
   stderr = '';
   const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
     stderr += String(chunk);
@@ -66,7 +65,6 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreStderr();
-  process.exitCode = undefined;
   vi.mocked(localRun).mockReset();
   for (const dir of tmpdirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
