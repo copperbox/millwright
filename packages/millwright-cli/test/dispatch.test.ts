@@ -234,6 +234,36 @@ describe('dispatch', () => {
     );
   });
 
+  it('fails fast when a choice input has no default and no --input value', async () => {
+    const entries = new Map([
+      [
+        'octo/app|refs/heads/main',
+        registryEntry({
+          deploy: {
+            triggers: [
+              {
+                kind: 'manual',
+                inputs: {
+                  env: { choices: ['staging', 'prod'] },
+                  region: { choices: ['eu', 'us'], default: 'eu' },
+                  notify: { type: 'boolean' },
+                },
+              },
+            ],
+          },
+        }),
+      ],
+    ]);
+    const { deps, put } = harness({ entries });
+    await expect(dispatch({ workflow: 'deploy' }, deps)).rejects.toThrow(
+      'input "env" has no default — pass --input env=<staging|prod>',
+    );
+    await expect(dispatch({ workflow: 'deploy' }, deps)).rejects.toThrow(DispatchError);
+    expect(put).toHaveLength(0);
+    await dispatch({ workflow: 'deploy', inputs: ['env=prod'] }, deps);
+    expect(put[0].detail.inputs).toEqual({ env: 'prod', region: 'eu' });
+  });
+
   it('rejects a workflow that is unregistered or lacks a manual trigger', async () => {
     const entries = new Map([
       [

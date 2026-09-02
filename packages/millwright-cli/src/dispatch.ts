@@ -213,7 +213,7 @@ function manualInputDeclarations(
   return declared;
 }
 
-/** Validate and coerce raw `k=v` inputs against the declaration; apply defaults. */
+/** Validate and coerce raw `k=v` inputs against the declaration; apply defaults, fail on missing required choices. */
 function typeInputs(
   raw: Record<string, string>,
   declared: Record<string, DeclaredInput>,
@@ -243,8 +243,18 @@ function typeInputs(
     }
   }
   for (const [name, declaration] of Object.entries(declared)) {
-    if (!(name in typed) && declaration.default !== undefined) {
+    if (name in typed) {
+      continue;
+    }
+    if (declaration.default !== undefined) {
       typed[name] = declaration.default;
+    } else if (declaration.kind === 'choices') {
+      // Booleans fall back to `false` in synth; a defaultless choice input has
+      // nothing to fall back to and synth would reject it as `missing-input`.
+      // Fail here instead, worded as `millwright run` words the same gap.
+      throw new DispatchError(
+        `input "${name}" has no default — pass --input ${name}=<${declaration.choices.join('|')}>`,
+      );
     }
   }
   return typed;
