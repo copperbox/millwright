@@ -123,9 +123,9 @@ event is emitted, pinning definition and source together. Inputs are typed
 against the workflow's `Trigger.manual` declaration — choices are validated,
 booleans take `true`/`false`, and a choice input with no default must be
 supplied or the dispatch fails before any event is emitted. The event goes
-onto the deployment's bus
-under your own AWS credentials with `source: millwright.cli`; the bus resource
-policy and the launcher both reject `dispatch` events from any other source.
+onto the deployment's bus under your own AWS credentials with
+`source: millwright.cli`; the bus resource policy and the launcher both reject
+`dispatch` events from any other source.
 
 ### Checks and branch protection
 
