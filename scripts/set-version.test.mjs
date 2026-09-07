@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { applyVersion, checkLockstep, packageDirs } from './set-version.mjs';
+import { applyVersion, checkLockstep, packageDirs, resolveVersion } from './set-version.mjs';
 
 const script = join(import.meta.dirname, 'set-version.mjs');
 
@@ -172,6 +172,16 @@ describe('applyVersion', () => {
   });
 });
 
+describe('resolveVersion', () => {
+  it('reads npm_package_version only under the version lifecycle', () => {
+    const env = { npm_lifecycle_event: 'version', npm_package_version: '1.2.3' };
+    expect(resolveVersion([], env)).toBe('1.2.3');
+    expect(resolveVersion([], { ...env, npm_lifecycle_event: 'set-version' })).toBeUndefined();
+    expect(resolveVersion([], { npm_package_version: '1.2.3' })).toBeUndefined();
+    expect(resolveVersion(['0.9.0'], env)).toBe('0.9.0');
+  });
+});
+
 describe('command line', () => {
   it('rejects a missing or malformed version', () => {
     for (const args of [[], ['1.2']]) {
@@ -190,12 +200,27 @@ describe('command line', () => {
   });
 
   it('validates npm_package_version under the version lifecycle', () => {
-    // A malformed value must be rejected before anything is written; a valid
-    // one would rewrite this checkout, so only the failure path is exercised.
     const env = { ...process.env, npm_lifecycle_event: 'version', npm_package_version: 'not-a-version' };
     const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Usage:');
+  });
+
+  it('applies npm_package_version under the version lifecycle', () => {
+    // The script resolves its tree from its own location, so a copy inside a
+    // fixture rewrites the fixture rather than this checkout.
+    const root = fixture('0.6.3');
+    try {
+      mkdirSync(join(root, 'scripts'));
+      copyFileSync(script, join(root, 'scripts', 'set-version.mjs'));
+      const env = { ...process.env, npm_lifecycle_event: 'version', npm_package_version: '0.7.0' };
+      const result = spawnSync(process.execPath, [join(root, 'scripts', 'set-version.mjs')], { encoding: 'utf8', env });
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(checkLockstep(root)).toEqual({ version: '0.7.0', mismatches: [] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('rejects --check combined with a version', () => {

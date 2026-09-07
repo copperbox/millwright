@@ -13,7 +13,7 @@
     "test": "vitest run",
     "set-version": "node scripts/set-version.mjs",
     "check-version": "node scripts/set-version.mjs --check",
-    "version": "node scripts/set-version.mjs && npm install --package-lock-only && git add -A packages package-lock.json"
+    "version": "node scripts/set-version.mjs && npm install --package-lock-only && git add -u packages package-lock.json"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

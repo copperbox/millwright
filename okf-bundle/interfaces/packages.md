@@ -30,7 +30,7 @@ between "millwright's own deployment is CDK" and "your workflows are not CDK".
 ```sh
 npm install && npm run typecheck && npm test && npm run build
 
-npm version 0.2.0               # bump every package to one version
+npm version 0.2.0 -m 'chore(release): v%s'   # bump every package, commit, tag v0.2.0
 npm run build
 npm publish --workspaces
 ```
@@ -39,7 +39,9 @@ npm publish --workspaces
 every manifest on the root version, every `@copperbox/millwright-*` range at `^<version>`, every
 `src/version.ts` `VERSION` matching. `.github/workflows/ci.yml` runs typecheck, test, build, and
 this check on pull requests and pushes to `main`. The root `version` lifecycle script fans an
-`npm version` bump through `set-version.mjs` and refreshes the lockfile; publishing stays manual.
+`npm version` bump through `set-version.mjs` and refreshes the lockfile. `npm version` then
+commits and tags `v<version>`, and it refuses to run on a dirty tree; `--no-git-tag-version`
+leaves the bump staged without a commit or tag. Publishing stays manual.
 
 ## Related
 

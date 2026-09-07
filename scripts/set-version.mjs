@@ -112,7 +112,7 @@ function usage() {
  * The version to apply: the positional argument, or, when running as npm's
  * `version` lifecycle script, the freshly bumped npm_package_version.
  */
-function resolveVersion(positional, env) {
+export function resolveVersion(positional, env) {
   if (positional.length > 0) return positional[0];
   if (env.npm_lifecycle_event === 'version') return env.npm_package_version;
   return undefined;
