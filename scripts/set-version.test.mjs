@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,9 +27,18 @@ const internalDeps = {
 
 const withVersionTs = new Set(['packages/millwright-cdk', 'packages/millwright-cli']);
 
+const tmpdirs = [];
+
+afterEach(() => {
+  for (const dir of tmpdirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /** Builds a minimal lockstep tree at `version` and returns its root. */
 function fixture(version) {
   const root = mkdtempSync(join(tmpdir(), 'set-version-'));
+  tmpdirs.push(root);
   for (const dir of packageDirs) {
     mkdirSync(join(root, dir), { recursive: true });
     const manifest = { name: names[dir], version };
@@ -60,115 +69,87 @@ function writeManifest(root, dir, manifest) {
 describe('checkLockstep', () => {
   it('reports no mismatches for a tree in lockstep', () => {
     const root = fixture('0.6.3');
-    try {
-      expect(checkLockstep(root)).toEqual({ version: '0.6.3', mismatches: [] });
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    expect(checkLockstep(root)).toEqual({ version: '0.6.3', mismatches: [] });
   });
 
   it('names a package whose version drifted from the root', () => {
     const root = fixture('0.6.3');
-    try {
-      const manifest = readManifest(root, 'packages/millwright-cli');
-      manifest.version = '0.6.2';
-      writeManifest(root, 'packages/millwright-cli', manifest);
+    const manifest = readManifest(root, 'packages/millwright-cli');
+    manifest.version = '0.6.2';
+    writeManifest(root, 'packages/millwright-cli', manifest);
 
-      const { mismatches } = checkLockstep(root);
-      expect(mismatches).toHaveLength(1);
-      expect(mismatches[0]).toContain('packages/millwright-cli/package.json');
-      expect(mismatches[0]).toContain('0.6.2');
-      expect(mismatches[0]).toContain('0.6.3');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const { mismatches } = checkLockstep(root);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0]).toContain('packages/millwright-cli/package.json');
+    expect(mismatches[0]).toContain('0.6.2');
+    expect(mismatches[0]).toContain('0.6.3');
   });
 
   it('names an internal dependency range that is not ^<root version>', () => {
     const root = fixture('0.6.3');
-    try {
-      const manifest = readManifest(root, 'packages/millwright-cdk');
-      manifest.devDependencies['@copperbox/millwright-cli'] = '^0.6.2';
-      writeManifest(root, 'packages/millwright-cdk', manifest);
+    const manifest = readManifest(root, 'packages/millwright-cdk');
+    manifest.devDependencies['@copperbox/millwright-cli'] = '^0.6.2';
+    writeManifest(root, 'packages/millwright-cdk', manifest);
 
-      const { mismatches } = checkLockstep(root);
-      expect(mismatches).toHaveLength(1);
-      expect(mismatches[0]).toContain('packages/millwright-cdk/package.json');
-      expect(mismatches[0]).toContain('devDependencies');
-      expect(mismatches[0]).toContain('@copperbox/millwright-cli');
-      expect(mismatches[0]).toContain('^0.6.2');
-      expect(mismatches[0]).toContain('^0.6.3');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const { mismatches } = checkLockstep(root);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0]).toContain('packages/millwright-cdk/package.json');
+    expect(mismatches[0]).toContain('devDependencies');
+    expect(mismatches[0]).toContain('@copperbox/millwright-cli');
+    expect(mismatches[0]).toContain('^0.6.2');
+    expect(mismatches[0]).toContain('^0.6.3');
   });
 
   it('ignores external dependency ranges', () => {
     const root = fixture('0.6.3');
-    try {
-      const manifest = readManifest(root, 'packages/millwright-cdk');
-      manifest.devDependencies.typescript = '^0.0.1';
-      writeManifest(root, 'packages/millwright-cdk', manifest);
-      expect(checkLockstep(root).mismatches).toEqual([]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const manifest = readManifest(root, 'packages/millwright-cdk');
+    manifest.devDependencies.typescript = '^0.0.1';
+    writeManifest(root, 'packages/millwright-cdk', manifest);
+    expect(checkLockstep(root).mismatches).toEqual([]);
   });
 
   it('names an embedded VERSION constant that drifted', () => {
     const root = fixture('0.6.3');
-    try {
-      writeFileSync(
-        join(root, 'packages/millwright-cdk/src/version.ts'),
-        "export const VERSION = '0.6.2';\n",
-      );
+    writeFileSync(
+      join(root, 'packages/millwright-cdk/src/version.ts'),
+      "export const VERSION = '0.6.2';\n",
+    );
 
-      const { mismatches } = checkLockstep(root);
-      expect(mismatches).toHaveLength(1);
-      expect(mismatches[0]).toContain('packages/millwright-cdk/src/version.ts');
-      expect(mismatches[0]).toContain('0.6.2');
-      expect(mismatches[0]).toContain('0.6.3');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const { mismatches } = checkLockstep(root);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0]).toContain('packages/millwright-cdk/src/version.ts');
+    expect(mismatches[0]).toContain('0.6.2');
+    expect(mismatches[0]).toContain('0.6.3');
   });
 
   it('lists every mismatch rather than stopping at the first', () => {
     const root = fixture('0.6.3');
-    try {
-      for (const dir of ['packages/millwright-state', 'packages/millwright-workflows']) {
-        const manifest = readManifest(root, dir);
-        manifest.version = '0.6.2';
-        writeManifest(root, dir, manifest);
-      }
-      writeFileSync(join(root, 'packages/millwright-cli/src/version.ts'), "export const VERSION = '0.5.0';\n");
-
-      const { mismatches } = checkLockstep(root);
-      expect(mismatches).toHaveLength(3);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+    for (const dir of ['packages/millwright-state', 'packages/millwright-workflows']) {
+      const manifest = readManifest(root, dir);
+      manifest.version = '0.6.2';
+      writeManifest(root, dir, manifest);
     }
+    writeFileSync(join(root, 'packages/millwright-cli/src/version.ts'), "export const VERSION = '0.5.0';\n");
+
+    const { mismatches } = checkLockstep(root);
+    expect(mismatches).toHaveLength(3);
   });
 });
 
 describe('applyVersion', () => {
   it('leaves a drifted tree in lockstep at the new version', () => {
     const root = fixture('0.6.2');
-    try {
-      const manifest = readManifest(root, 'packages/millwright-cli');
-      manifest.version = '0.5.0';
-      writeManifest(root, 'packages/millwright-cli', manifest);
+    const manifest = readManifest(root, 'packages/millwright-cli');
+    manifest.version = '0.5.0';
+    writeManifest(root, 'packages/millwright-cli', manifest);
 
-      applyVersion(root, '0.6.3');
+    applyVersion(root, '0.6.3');
 
-      expect(checkLockstep(root)).toEqual({ version: '0.6.3', mismatches: [] });
-      expect(readManifest(root, 'packages/millwright-cdk').dependencies['@copperbox/millwright-state']).toBe('^0.6.3');
-      expect(readFileSync(join(root, 'packages/millwright-cli/src/version.ts'), 'utf8')).toContain(
-        "export const VERSION = '0.6.3';",
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    expect(checkLockstep(root)).toEqual({ version: '0.6.3', mismatches: [] });
+    expect(readManifest(root, 'packages/millwright-cdk').dependencies['@copperbox/millwright-state']).toBe('^0.6.3');
+    expect(readFileSync(join(root, 'packages/millwright-cli/src/version.ts'), 'utf8')).toContain(
+      "export const VERSION = '0.6.3';",
+    );
   });
 });
 
@@ -210,17 +191,13 @@ describe('command line', () => {
     // The script resolves its tree from its own location, so a copy inside a
     // fixture rewrites the fixture rather than this checkout.
     const root = fixture('0.6.3');
-    try {
-      mkdirSync(join(root, 'scripts'));
-      copyFileSync(script, join(root, 'scripts', 'set-version.mjs'));
-      const env = { ...process.env, npm_lifecycle_event: 'version', npm_package_version: '0.7.0' };
-      const result = spawnSync(process.execPath, [join(root, 'scripts', 'set-version.mjs')], { encoding: 'utf8', env });
-      expect(result.stderr).toBe('');
-      expect(result.status).toBe(0);
-      expect(checkLockstep(root)).toEqual({ version: '0.7.0', mismatches: [] });
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    mkdirSync(join(root, 'scripts'));
+    copyFileSync(script, join(root, 'scripts', 'set-version.mjs'));
+    const env = { ...process.env, npm_lifecycle_event: 'version', npm_package_version: '0.7.0' };
+    const result = spawnSync(process.execPath, [join(root, 'scripts', 'set-version.mjs')], { encoding: 'utf8', env });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(checkLockstep(root)).toEqual({ version: '0.7.0', mismatches: [] });
   });
 
   it('rejects --check combined with a version', () => {
