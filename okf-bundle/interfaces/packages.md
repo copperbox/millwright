@@ -35,6 +35,11 @@ npm run build
 npm publish --workspaces
 ```
 
+`npm run check-version` (`scripts/set-version.mjs --check`) asserts the lockstep without writing:
+every manifest on the root version, every `@copperbox/millwright-*` range at `^<version>`, every
+`src/version.ts` `VERSION` matching. `.github/workflows/ci.yml` runs typecheck, test, build, and
+this check on pull requests and pushes to `main`; releases stay manual.
+
 ## Related
 
 - [Deployment construct](deployment.md) · [Run model](../schemas/run-model.md) for the

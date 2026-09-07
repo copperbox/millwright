@@ -50,6 +50,11 @@ npm run build
 npm publish --workspaces
 ```
 
+`npm run check-version` verifies the lockstep without changing anything:
+every manifest on the root version, every internal dependency range at
+`^<version>`, every embedded `VERSION` constant matching. CI runs it alongside
+typecheck, test, and build on every pull request and push to `main`.
+
 ## Getting started (operators)
 
 ```sh
