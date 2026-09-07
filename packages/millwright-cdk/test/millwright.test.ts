@@ -3,12 +3,6 @@ import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { describe, expect, it } from 'vitest';
 import { Boundary, Millwright, MillwrightProps, SUPPORTED_SCHEMA_VERSION, VERSION } from '../src';
-import cdkPkg from '../package.json';
-import rootPkg from '../../../package.json';
-import cliPkg from '../../millwright-cli/package.json';
-import statePkg from '../../millwright-state/package.json';
-import workflowsPkg from '../../millwright-workflows/package.json';
-import { VERSION as CLI_VERSION } from '../../millwright-cli/src/version';
 
 const BOUNDARY_ARN = 'arn:aws:iam::123456789012:policy/team-boundary';
 
@@ -164,21 +158,5 @@ describe('run executor wiring', () => {
   it('deploys the build project under the exact name the run executor pinned', () => {
     const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
     expect(millwright.buildProject.projectName).toBe(millwright.runExecutor.buildProjectName);
-  });
-});
-
-describe('lockstep version', () => {
-  it('keeps the embedded VERSION constants in sync with their manifests', () => {
-    expect(VERSION).toBe(cdkPkg.version);
-    expect(CLI_VERSION).toBe(cliPkg.version);
-  });
-
-  it('keeps every workspace manifest on the root version', () => {
-    // A hand-edited bump that skips `npm run set-version` moves some subset
-    // of the five manifests; pinning all four workspaces to the root catches
-    // any divergence, not just the cdk one.
-    for (const pkg of [cdkPkg, cliPkg, statePkg, workflowsPkg]) {
-      expect(pkg.version, pkg.name).toBe(rootPkg.version);
-    }
   });
 });

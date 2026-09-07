@@ -188,8 +188,8 @@ describe('command line', () => {
   });
 
   it('passes --check against this repository', () => {
-    // The real tree is the one CI guards; the cdk suite pins the same
-    // invariant, so a drift here fails both.
+    // The real tree is the one CI guards; this test is the only place the
+    // invariant is asserted, so a drift anywhere in the tree fails here.
     const result = spawnSync(process.execPath, [script, '--check'], { encoding: 'utf8' });
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);

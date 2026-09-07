@@ -12,7 +12,8 @@
     "typecheck": "npm run typecheck --workspaces",
     "test": "vitest run",
     "set-version": "node scripts/set-version.mjs",
-    "check-version": "node scripts/set-version.mjs --check"
+    "check-version": "node scripts/set-version.mjs --check",
+    "version": "node scripts/set-version.mjs $npm_package_version && npm install --package-lock-only && git add -A packages package-lock.json"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
