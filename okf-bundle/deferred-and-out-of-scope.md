@@ -5,7 +5,7 @@ tags:
   - millwright
   - v1
   - scope
-timestamp: 2026-08-12T21:28:37.833Z
+timestamp: 2026-08-13T18:42:26.327Z
 ---
 
 Recorded so these are not re-proposed as oversights. **Deferred** means "considered, not now";
@@ -14,7 +14,13 @@ Recorded so these are not re-proposed as oversights. **Deferred** means "conside
 ## Deferred
 
 - **fail-fast** job cancellation on first failure
-- **GitHub Actions YAML importer**
+- **GitHub Actions YAML importer** — *no longer merely deferred*: under active wayfinding as of
+  2026-08-13 with its own map (`wayfinder/gha-import/map.md`), destination
+  `spec/millwright-import.md`. Framed as a **one-shot, disposable codegen** (GHA YAML →
+  `millwright/workflows.ts`), explicitly **not** a compatibility layer — no YAML at runtime, no
+  marketplace action runtime, no fidelity promise. The v1 API is fixed for that effort; gaps it
+  exposes (no `env` on `JobProps`, no job outputs, no second-repo source) become a findings
+  handoff, not API changes.
 - **notifications and badges** (this is why the construct has no notification-target props)
 - **run web UI**
 - **`SecretFile`** — file-shaped secrets are v1'd by a step writing the env var to disk

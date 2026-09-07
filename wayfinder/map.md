@@ -161,8 +161,11 @@ Prototype tickets have no dedicated skill installed — build a rough throwaway 
 - **Fail-fast** — opt-in run-level "cancel remaining jobs on first failure". Ruled out
   of v1 by [Orchestration and state model](tickets/006-orchestration-state-model.md);
   the cancellation path it would reuse now exists.
-- **GHA YAML importer** — best-effort converter from `.github/workflows` to millwright
-  definitions. Deferred convenience; sharpens once the native definition model exists.
+- **GHA YAML importer** — ~~best-effort converter from `.github/workflows` to millwright
+  definitions. Deferred convenience; sharpens once the native definition model exists.~~
+  **Graduated 2026-08-13** into its own effort: [GHA import map](gha-import/map.md),
+  charted now that the definition model exists and ships. Scoped there as a one-shot,
+  disposable codegen — not a compatibility layer.
 - **Notifications & badges** — run-result notifications (Slack/email), status badges.
 - **Run web UI** — a minimal hosted run/log viewer layered on the CLI's data. Deferred
   convenience per [Run observability DX](tickets/005-run-observability-dx.md); sharpens
