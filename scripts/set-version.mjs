@@ -3,8 +3,15 @@
 // version, every internal @copperbox/millwright-* dependency range is
 // ^<version>, and the embedded src/version.ts constants track package.json.
 //
-//   npm run set-version -- 0.2.0   # bump everything to 0.2.0
+//   npm version 0.2.0              # bump everything to 0.2.0 (via the
+//                                  # root `version` lifecycle script)
+//   npm run set-version -- 0.2.0   # the same bump without npm version
 //   npm run set-version -- --check # verify the tree is in lockstep (CI)
+//
+// Under `npm version` the script takes no argument: npm exports the new
+// version as npm_package_version for every lifecycle script on every
+// platform, whereas `$npm_package_version` in package.json only expands
+// under a POSIX shell (cmd.exe hands it over as a literal).
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -97,7 +104,18 @@ export function checkLockstep(root) {
 function usage() {
   console.error('Usage: npm run set-version -- <semver>');
   console.error('       npm run set-version -- --check');
+  console.error('       npm version <semver>   (reads npm_package_version)');
   process.exit(1);
+}
+
+/**
+ * The version to apply: the positional argument, or, when running as npm's
+ * `version` lifecycle script, the freshly bumped npm_package_version.
+ */
+function resolveVersion(positional, env) {
+  if (positional.length > 0) return positional[0];
+  if (env.npm_lifecycle_event === 'version') return env.npm_package_version;
+  return undefined;
 }
 
 function main(args) {
@@ -118,7 +136,7 @@ function main(args) {
     return;
   }
 
-  const version = positional[0];
+  const version = resolveVersion(positional, process.env);
   if (!version || !versionPattern.test(version)) usage();
   for (const line of applyVersion(root, version)) console.log(line);
 }

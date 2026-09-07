@@ -42,13 +42,19 @@ npm test
 npm run build
 ```
 
-Releases bump every package to one version, then publish them all:
+Releases bump every package to one version, then publish them all. `npm version`
+fans the bump out through `scripts/set-version.mjs` (workspace manifests, internal
+ranges, embedded `VERSION` constants) and refreshes the lockfile:
 
 ```sh
-npm run set-version -- 0.2.0
+npm version 0.2.0
 npm run build
 npm publish --workspaces
 ```
+
+To bump without `npm version`, run `npm run set-version -- 0.2.0` followed by
+`npm install --package-lock-only`; `check-version` does not inspect the lockfile,
+so a bare `set-version` leaves `package-lock.json` behind unnoticed.
 
 `npm run check-version` verifies the lockstep without changing anything:
 every manifest on the root version, every internal dependency range at

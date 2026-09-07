@@ -181,6 +181,23 @@ describe('command line', () => {
     }
   });
 
+  it('ignores npm_package_version outside the version lifecycle', () => {
+    const env = { ...process.env, npm_package_version: '1.2.3' };
+    delete env.npm_lifecycle_event;
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Usage:');
+  });
+
+  it('validates npm_package_version under the version lifecycle', () => {
+    // A malformed value must be rejected before anything is written; a valid
+    // one would rewrite this checkout, so only the failure path is exercised.
+    const env = { ...process.env, npm_lifecycle_event: 'version', npm_package_version: 'not-a-version' };
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Usage:');
+  });
+
   it('rejects --check combined with a version', () => {
     const result = spawnSync(process.execPath, [script, '--check', '1.2.3'], { encoding: 'utf8' });
     expect(result.status).toBe(1);
