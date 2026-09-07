@@ -17,9 +17,11 @@
  * official node distribution matching this process's version; the SEA blob
  * is generated once (no snapshot, no code cache) and injected per target, so
  * cross-arch packaging needs no emulation. Non-host targets download the
- * node tarball from nodejs.org (cached under dist/.node-cache/).
+ * node tarball from nodejs.org, verify it against SHASUMS256.txt, and cache
+ * the extracted binary under .shim-cache/ (outside dist/, which npm packs).
  */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +30,9 @@ import { build } from 'esbuild';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(packageRoot, 'dist', 'shim');
-const cacheDir = join(packageRoot, 'dist', '.node-cache');
+// Cache and SEA scratch files live outside dist: `files` lists dist, so
+// anything under it would land in the published tarball.
+const cacheDir = join(packageRoot, '.shim-cache');
 
 const SEA_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 const KNOWN_TARGETS = ['linux-x64', 'linux-arm64'];
@@ -106,6 +110,32 @@ function extractTarMember(tarBuffer, suffix) {
   throw new Error(`"${suffix}" not found in tarball`);
 }
 
+async function fetchBuffer(url) {
+  console.log(`fetching ${url}`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`download failed (${response.status}) for ${url}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/** Check a downloaded dist file against the release's SHASUMS256.txt. */
+async function verifySha256(fileName, buffer) {
+  const shasums = await fetchBuffer(`https://nodejs.org/dist/${process.version}/SHASUMS256.txt`);
+  const line = shasums
+    .toString('utf8')
+    .split('\n')
+    .find((entry) => entry.trim().endsWith(`  ${fileName}`));
+  if (!line) {
+    throw new Error(`${fileName} not listed in SHASUMS256.txt for ${process.version}`);
+  }
+  const expected = line.trim().split(/\s+/)[0];
+  const actual = createHash('sha256').update(buffer).digest('hex');
+  if (actual !== expected) {
+    throw new Error(`sha256 mismatch for ${fileName}: expected ${expected}, got ${actual}`);
+  }
+}
+
 async function nodeBinaryFor(target) {
   const host = hostTarget();
   if (target === host) {
@@ -116,13 +146,8 @@ async function nodeBinaryFor(target) {
   if (existsSync(cached)) {
     return readFileSync(cached);
   }
-  const url = `https://nodejs.org/dist/${process.version}/${name}.tar.gz`;
-  console.log(`fetching ${url}`);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`download failed (${response.status}) for ${url}`);
-  }
-  const tarball = Buffer.from(await response.arrayBuffer());
+  const tarball = await fetchBuffer(`https://nodejs.org/dist/${process.version}/${name}.tar.gz`);
+  await verifySha256(`${name}.tar.gz`, tarball);
   const binary = extractTarMember(gunzipSync(tarball), `${name}/bin/node`);
   mkdirSync(cacheDir, { recursive: true });
   writeFileSync(cached, binary);

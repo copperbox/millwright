@@ -154,7 +154,19 @@ function bool(flag: string, value: string): boolean {
   throw new CommandError(`${flag} must be true or false, got "${value}"`);
 }
 
-export function buildProgram(): Command {
+/**
+ * A per-invocation holder for the exit code a command action wants to report.
+ * The synth and run actions signal failure by writing here rather than by
+ * throwing, and `main` reads it back once `parseAsync` resolves. Keeping the
+ * signal off `process.exitCode` means bin.ts is the only writer of process
+ * state and a failing `main()` leaves nothing behind for the next call.
+ */
+interface ExitSignal {
+  code: number;
+}
+
+function buildProgramWithSignal(): { program: Command; exitCode: () => number } {
+  const signal: ExitSignal = { code: 0 };
   const program = new Command('millwright');
   program
     .description('Operate a millwright deployment — polling-driven CI/CD in your own AWS account')
@@ -225,7 +237,7 @@ export function buildProgram(): Command {
       }) => {
         const code = runSynthCommand(options);
         if (code !== 0) {
-          process.exitCode = code;
+          signal.code = code;
         }
       },
     );
@@ -367,7 +379,7 @@ export function buildProgram(): Command {
       ) => {
         const result = await localRun(localRunDeps(), { workflow, ...options });
         if (result.status !== 'SUCCEEDED') {
-          process.exitCode = 1;
+          signal.code = 1;
         }
       },
     );
@@ -520,7 +532,16 @@ export function buildProgram(): Command {
       );
     });
 
-  return program;
+  return { program, exitCode: () => signal.code };
+}
+
+/**
+ * The command tree, for introspection (help text, structural tests). Exit
+ * codes signalled by the `synth` and `run` actions are not observable through
+ * this program; call `main()` if you need the effective exit code.
+ */
+export function buildProgram(): Command {
+  return buildProgramWithSignal().program;
 }
 
 function discover(program: Command): Promise<Deployment> {
@@ -543,10 +564,10 @@ const USER_FACING_ERRORS = [
 ];
 
 export async function main(argv: readonly string[]): Promise<number> {
-  const program = buildProgram();
+  const { program, exitCode } = buildProgramWithSignal();
   try {
     await program.parseAsync(argv as string[]);
-    return 0;
+    return exitCode();
   } catch (err) {
     if (USER_FACING_ERRORS.some((kind) => err instanceof kind)) {
       process.stderr.write(`millwright: ${(err as Error).message}\n`);

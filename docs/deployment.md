@@ -139,10 +139,10 @@ discovers the deployment through.
 
 Watch the synth output for two warnings worth acting on. `shimWithoutBinaries`
 means the step-shim delivery carries only the node-on-PATH fallback bundle, and
-jobs whose images lack node will fail at their first step — released npm builds
-ship the prebuilt binaries, so this should only appear when deploying from a
-source checkout without `npm run build:shim`. `noPermissionsBoundary` means you
-are on `Boundary.NONE`.
+jobs whose images lack node will fail at their first step — `npm run build`
+produces the prebuilt binaries and released npm builds ship them, so this
+should only appear when deploying from an unbuilt source checkout.
+`noPermissionsBoundary` means you are on `Boundary.NONE`.
 
 ## 3. `millwright setup`
 
