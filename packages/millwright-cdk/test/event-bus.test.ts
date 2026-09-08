@@ -1,13 +1,14 @@
-import { App, Stack } from 'aws-cdk-lib';
+import { Stack } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
 import { MillwrightEventBus } from '../src';
+import { testApp } from './support/test-app';
 
 function synth(deploymentName = 'millwright'): {
   bus: MillwrightEventBus;
   template: Template;
 } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const bus = new MillwrightEventBus(stack, 'EventBus', { deploymentName });
   return { bus, template: Template.fromStack(stack) };
 }

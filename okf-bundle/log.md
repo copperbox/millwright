@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-08
+* Record why CDK construct tests share one outdir and why vitest's timeout is 30 s
+
 ## 2026-08-13
 * **Update**: Updated [Deferred and out of scope for v1](/deferred-and-out-of-scope.md).
 

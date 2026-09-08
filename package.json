@@ -1,6 +1,6 @@
 {
   "name": "millwright",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "description": "Millwright monorepo — polling-driven CI/CD in your own AWS account",
   "license": "MIT",
@@ -11,7 +11,9 @@
     "build": "npm run build --workspace @copperbox/millwright-state --workspace @copperbox/millwright-workflows --workspace @copperbox/millwright-cdk --workspace @copperbox/millwright-cli",
     "typecheck": "npm run typecheck --workspaces",
     "test": "vitest run",
-    "set-version": "node scripts/set-version.mjs"
+    "set-version": "node scripts/set-version.mjs",
+    "check-version": "node scripts/set-version.mjs --check",
+    "version": "node scripts/set-version.mjs && npm install --package-lock-only && git add -u package.json packages package-lock.json"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

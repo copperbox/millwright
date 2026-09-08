@@ -1,12 +1,13 @@
-import { App, Duration, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { describe, expect, it } from 'vitest';
 import { Launcher, MillwrightEventBus } from '../src';
+import { testApp } from './support/test-app';
 
 function synth(): { launcher: Launcher; template: Template } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const bus = new MillwrightEventBus(stack, 'EventBus', { deploymentName: 'ci' });
   const launcher = new Launcher(stack, 'Launcher', {
     deploymentName: 'ci',

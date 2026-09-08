@@ -42,13 +42,30 @@ npm test
 npm run build
 ```
 
-Releases bump every package to one version, then publish them all:
+Releases bump every package to one version, then publish them all. `npm version`
+fans the bump out through `scripts/set-version.mjs` (workspace manifests, internal
+ranges, embedded `VERSION` constants) and refreshes the lockfile. It also creates
+a release commit and a `v<version>` tag, and refuses to run on a dirty tree, so
+commit or stash first. Pass `-m` to keep the `chore(release): vX.Y.Z` commit
+convention:
 
 ```sh
-npm run set-version -- 0.2.0
+npm version 0.2.0 -m 'chore(release): v%s'
 npm run build
 npm publish --workspaces
 ```
+
+Add `--no-git-tag-version` to skip the commit and tag; the bump is then left
+staged for you to commit yourself.
+
+To bump without `npm version`, run `npm run set-version -- 0.2.0` followed by
+`npm install --package-lock-only`; `check-version` does not inspect the lockfile,
+so a bare `set-version` leaves `package-lock.json` behind unnoticed.
+
+`npm run check-version` verifies the lockstep without changing anything:
+every manifest on the root version, every internal dependency range at
+`^<version>`, every embedded `VERSION` constant matching. CI runs it alongside
+typecheck, test, and build on every pull request and push to `main`.
 
 ## Getting started (operators)
 

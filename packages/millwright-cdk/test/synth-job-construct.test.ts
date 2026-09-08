@@ -1,8 +1,9 @@
-import { App, Stack } from 'aws-cdk-lib';
+import { Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Millwright } from '../src/millwright';
 import { SYNTH_IMAGE } from '../src/synth-image';
+import { testApp } from './support/test-app';
 
 const BOUNDARY_ARN = 'arn:aws:iam::123456789012:policy/boundary';
 
@@ -10,7 +11,7 @@ let millwright: Millwright;
 let template: Template;
 
 beforeAll(() => {
-  const app = new App();
+  const app = testApp();
   const stack = new Stack(app, 'Test');
   millwright = new Millwright(stack, 'Millwright', { permissionsBoundary: BOUNDARY_ARN });
   template = Template.fromStack(stack);

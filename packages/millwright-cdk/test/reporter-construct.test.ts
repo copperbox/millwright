@@ -1,4 +1,4 @@
-import { App, Stack } from 'aws-cdk-lib';
+import { Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as kms from 'aws-cdk-lib/aws-kms';
@@ -6,9 +6,10 @@ import { describe, expect, it } from 'vitest';
 import { Reporter } from '../src';
 import { checkStateKey } from '@copperbox/millwright-state';
 import { coordinatesFromStreamRecords } from '../src/runtime/reporter/handler';
+import { testApp } from './support/test-app';
 
 function synth(): { reporter: Reporter; template: Template } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const reporter = new Reporter(stack, 'Reporter', {
     deploymentName: 'ci',
     stateTable: new dynamodb.Table(stack, 'StateTable', {

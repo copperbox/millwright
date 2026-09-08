@@ -1,32 +1,27 @@
-import { App, Duration, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { describe, expect, it } from 'vitest';
 import { Boundary, Millwright, MillwrightProps, SUPPORTED_SCHEMA_VERSION, VERSION } from '../src';
-import cdkPkg from '../package.json';
-import rootPkg from '../../../package.json';
-import cliPkg from '../../millwright-cli/package.json';
-import statePkg from '../../millwright-state/package.json';
-import workflowsPkg from '../../millwright-workflows/package.json';
-import { VERSION as CLI_VERSION } from '../../millwright-cli/src/version';
+import { testApp } from './support/test-app';
 
 const BOUNDARY_ARN = 'arn:aws:iam::123456789012:policy/team-boundary';
 
 function stackWith(props: MillwrightProps): { stack: Stack; millwright: Millwright } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   return { stack, millwright: new Millwright(stack, 'Millwright', props) };
 }
 
 describe('permissionsBoundary', () => {
   it('throws at construct time when absent', () => {
-    const stack = new Stack(new App(), 'Test');
+    const stack = new Stack(testApp(), 'Test');
     expect(() => new Millwright(stack, 'Millwright', {} as MillwrightProps)).toThrow(
       /permissions boundary/i,
     );
   });
 
   it('throws on a value that is neither an ARN nor Boundary.NONE', () => {
-    const stack = new Stack(new App(), 'Test');
+    const stack = new Stack(testApp(), 'Test');
     expect(
       () => new Millwright(stack, 'Millwright', { permissionsBoundary: 'team-boundary' }),
     ).toThrow(/managed policy ARN or Boundary\.NONE/);
@@ -113,7 +108,7 @@ describe('manifest parameter', () => {
 
   it('rejects deployment names that cannot namespace SSM paths', () => {
     for (const bad of ['Millwright', 'has space', '-leading', 'a/b', '']) {
-      const stack = new Stack(new App(), 'Test');
+      const stack = new Stack(testApp(), 'Test');
       expect(
         () =>
           new Millwright(stack, 'Millwright', {
@@ -164,21 +159,5 @@ describe('run executor wiring', () => {
   it('deploys the build project under the exact name the run executor pinned', () => {
     const { millwright } = stackWith({ permissionsBoundary: BOUNDARY_ARN });
     expect(millwright.buildProject.projectName).toBe(millwright.runExecutor.buildProjectName);
-  });
-});
-
-describe('lockstep version', () => {
-  it('keeps the embedded VERSION constants in sync with their manifests', () => {
-    expect(VERSION).toBe(cdkPkg.version);
-    expect(CLI_VERSION).toBe(cliPkg.version);
-  });
-
-  it('keeps every workspace manifest on the root version', () => {
-    // A hand-edited bump that skips `npm run set-version` moves some subset
-    // of the five manifests; pinning all four workspaces to the root catches
-    // any divergence, not just the cdk one.
-    for (const pkg of [cdkPkg, cliPkg, statePkg, workflowsPkg]) {
-      expect(pkg.version, pkg.name).toBe(rootPkg.version);
-    }
   });
 });

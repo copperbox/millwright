@@ -4,12 +4,13 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { App, Stack } from 'aws-cdk-lib';
+import { Stack } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import cdkPkg from '../package.json';
 import { ShimAssets, stageShimDelivery } from '../src';
+import { testApp } from './support/test-app';
 
 const sh = promisify(execFile);
 
@@ -104,7 +105,7 @@ describe('release build', () => {
 
 describe('shim assets construct (C13)', () => {
   it('deploys the staged delivery to the artifact bucket under control/shim/', () => {
-    const stack = new Stack(new App(), 'Test');
+    const stack = new Stack(testApp(), 'Test');
     new ShimAssets(stack, 'ShimAssets', {
       deploymentName: 'ci',
       artifactBucket: new s3.Bucket(stack, 'Artifacts'),
