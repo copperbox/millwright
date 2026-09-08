@@ -73,10 +73,16 @@ interface JobPlan {
  */
 class FakeExecutor implements Executor {
   readonly started: LocalJobSpec[] = [];
+  private startWaiters: ((spec: LocalJobSpec) => void)[] = [];
 
   constructor(private readonly plans: Readonly<Record<string, JobPlan>> = {}) {}
 
   async preflight(): Promise<void> {}
+
+  /** Resolves when the next job container is started. */
+  nextStart(): Promise<LocalJobSpec> {
+    return new Promise((resolve) => this.startWaiters.push(resolve));
+  }
 
   private emit(spec: LocalJobSpec, status: string, extra: Record<string, unknown> = {}): void {
     fs.mkdirSync(path.dirname(spec.eventsFile), { recursive: true });
@@ -96,6 +102,9 @@ class FakeExecutor implements Executor {
 
   start(spec: LocalJobSpec): LocalExecution {
     this.started.push(spec);
+    const waiters = this.startWaiters;
+    this.startWaiters = [];
+    for (const waiter of waiters) waiter(spec);
     const attempt = this.started.filter((s) => s.job === spec.job).length;
     const plan = this.plans[spec.job] ?? {};
     let stopRequested = false;
@@ -262,9 +271,13 @@ describe('millwright run — the local host', () => {
     const executor = new FakeExecutor({ build: { block: true } });
     const h = harness(root, executor);
 
+    const started = executor.nextStart();
     const run = localRun(h.deps, { workflow: 'ci' });
-    // Let the build container start, then interrupt.
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Interrupt once the build container has started. A fixed sleep raced the
+    // run's setup (several real git subprocesses precede cancel registration):
+    // under load the cancel arrived before the handler existed, was dropped,
+    // and the blocked build never ended.
+    await started;
     h.cancel();
     const result = await run;
 
