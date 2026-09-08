@@ -1,7 +1,8 @@
-import { App, Duration, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
 import { Millwright, MillwrightProps } from '../src';
+import { testApp } from './support/test-app';
 
 const BOUNDARY_ARN = 'arn:aws:iam::123456789012:policy/team-boundary';
 
@@ -10,7 +11,7 @@ function templateFor(props: Partial<MillwrightProps> = {}): {
   millwright: Millwright;
   template: Template;
 } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const millwright = new Millwright(stack, 'Millwright', {
     permissionsBoundary: BOUNDARY_ARN,
     ...props,
@@ -169,7 +170,7 @@ describe('build log group (C17)', () => {
   });
 
   it('rejects retention day counts CloudWatch does not support', () => {
-    const stack = new Stack(new App(), 'Test');
+    const stack = new Stack(testApp(), 'Test');
     expect(
       () =>
         new Millwright(stack, 'Millwright', {

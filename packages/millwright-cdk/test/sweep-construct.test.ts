@@ -1,13 +1,14 @@
-import { App, Duration, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { describe, expect, it } from 'vitest';
 import { Sweep } from '../src';
+import { testApp } from './support/test-app';
 
 const RUN_EXECUTOR_ARN = 'arn:aws:states:eu-west-1:123456789012:stateMachine:ci-run-executor';
 
 function synth(deploymentName = 'ci'): Template {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const table = new dynamodb.Table(stack, 'StateTable', {
     partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
     sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },

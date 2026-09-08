@@ -1,11 +1,12 @@
-import { App, Duration, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { describe, expect, it } from 'vitest';
 import { MillwrightEventBus, StepEventsWriter } from '../src';
+import { testApp } from './support/test-app';
 
 function synth(deploymentName = 'ci'): Template {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const bus = new MillwrightEventBus(stack, 'EventBus', { deploymentName });
   const table = new dynamodb.Table(stack, 'StateTable', {
     partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },

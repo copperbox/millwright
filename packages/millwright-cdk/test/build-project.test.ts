@@ -1,12 +1,13 @@
-import { App, Stack } from 'aws-cdk-lib';
+import { Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { describe, expect, it } from 'vitest';
 import { BuildProject } from '../src';
+import { testApp } from './support/test-app';
 
 function synth(): { buildProject: BuildProject; template: Template } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const buildProject = new BuildProject(stack, 'BuildProject', {
     deploymentName: 'ci',
     artifactBucket: new s3.Bucket(stack, 'Artifacts'),

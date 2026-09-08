@@ -1,12 +1,13 @@
-import { App, Duration, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { describe, expect, it } from 'vitest';
 import { RunExecutor } from '../src';
+import { testApp } from './support/test-app';
 
 function synth(): { executor: RunExecutor; template: Template } {
-  const stack = new Stack(new App(), 'Test');
+  const stack = new Stack(testApp(), 'Test');
   const executor = new RunExecutor(stack, 'RunExecutor', {
     deploymentName: 'ci',
     stateTable: new dynamodb.Table(stack, 'StateTable', {
