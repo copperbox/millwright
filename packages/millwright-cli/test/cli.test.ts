@@ -51,10 +51,30 @@ describe('buildProgram', () => {
     );
   });
 
-  it('secrets set takes --scope', () => {
+  it('secrets set/list/rm take --scope; list also takes --all-scopes', () => {
     const secrets = program.commands.find((command) => command.name() === 'secrets')!;
-    const set = secrets.commands.find((command) => command.name() === 'set')!;
-    expect(set.options.map((option) => option.long)).toContain('--scope');
+    expect(secrets.commands.map((command) => command.name())).toEqual(
+      expect.arrayContaining(['set', 'list', 'rm']),
+    );
+    for (const name of ['set', 'list', 'rm']) {
+      const sub = secrets.commands.find((command) => command.name() === name)!;
+      expect(sub.options.map((option) => option.long)).toContain('--scope');
+    }
+    const list = secrets.commands.find((command) => command.name() === 'list')!;
+    expect(list.options.map((option) => option.long)).toContain('--all-scopes');
+    const rm = secrets.commands.find((command) => command.name() === 'rm')!;
+    expect(rm.registeredArguments.map((argument) => argument.name())).toEqual(['name']);
+  });
+
+  it('secrets list rejects --all-scopes combined with --scope', async () => {
+    const fresh = buildProgram();
+    const list = fresh.commands
+      .find((command) => command.name() === 'secrets')!
+      .commands.find((command) => command.name() === 'list')!;
+    list.exitOverride().configureOutput({ writeErr: () => undefined });
+    await expect(
+      fresh.parseAsync(['secrets', 'list', '--all-scopes', '--scope', 'acme/api'], { from: 'user' }),
+    ).rejects.toThrow(/'--all-scopes' cannot be used with option '--scope/);
   });
 
   it('setup takes the --pat fallback and App-creation options', () => {

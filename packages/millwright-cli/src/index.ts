@@ -153,7 +153,18 @@ export {
   DoctorReport,
   doctor,
 } from './doctor';
-export { SecretsDeps, SecretsSetOptions, parseGithubRemote, secretsSet } from './secrets';
+export {
+  SecretsDeps,
+  SecretsListEntry,
+  SecretsListOptions,
+  SecretsRmOptions,
+  SecretsScopeDeps,
+  SecretsSetOptions,
+  parseGithubRemote,
+  secretsList,
+  secretsRm,
+  secretsSet,
+} from './secrets';
 export {
   EventBridgeClientLike,
   RepoAddOptions,

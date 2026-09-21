@@ -22,6 +22,8 @@ Setup & ops
   millwright doctor
   millwright refresh-host-keys
   millwright secrets set <name> [--scope <scope>]
+  millwright secrets list [--scope <scope>] [--all-scopes]
+  millwright secrets rm <name> [--scope <scope>]
 
 Definition
   millwright synth
