@@ -10,6 +10,7 @@
 
 import { execFile } from 'node:child_process';
 import {
+  SecretParameterParts,
   configPlaneRoot,
   isSecretNameSegment,
   secretFromParameterName,
@@ -53,10 +54,8 @@ export interface SecretsRmOptions extends DiscoverOptions {
   readonly scope?: string;
 }
 
-export interface SecretsListEntry {
-  readonly scope: string;
-  readonly name: string;
-}
+/** One row of `secrets list`: the inverted parameter name. */
+export type SecretsListEntry = SecretParameterParts;
 
 /** `owner/repo` from an SSH, ssh://, git://, or https GitHub remote URL. */
 export function parseGithubRemote(url: string): string | undefined {

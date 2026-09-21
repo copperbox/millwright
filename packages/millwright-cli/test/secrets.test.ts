@@ -78,6 +78,28 @@ describe('secrets list', () => {
     expect(lines.join('\n')).not.toContain('hunter2');
   });
 
+  it('keeps a nested scope out of its parent scope listing', async () => {
+    // The recursive listing under `…/secrets/acme/` also returns `acme/api`'s
+    // secrets; only the scope filter keeps NPM_TOKEN out of scope `acme`.
+    const { ssm, deps, lines } = fixture();
+    ssm.set('/millwright/prod/secrets/acme/DEPLOY_KEY', 'x', 'SecureString');
+    ssm.set('/millwright/prod/secrets/acme/api/NPM_TOKEN', 'x', 'SecureString');
+    const entries = await secretsList(deps, { scope: 'acme' });
+    expect(entries).toEqual([{ scope: 'acme', name: 'DEPLOY_KEY' }]);
+    expect(lines).toEqual(['Secrets in scope acme (deployment "prod"):', 'DEPLOY_KEY']);
+  });
+
+  it('lists a nested scope and its parent under their own scopes with --all-scopes', async () => {
+    const { ssm, deps } = fixture();
+    ssm.set('/millwright/prod/secrets/acme/DEPLOY_KEY', 'x', 'SecureString');
+    ssm.set('/millwright/prod/secrets/acme/api/NPM_TOKEN', 'x', 'SecureString');
+    const entries = await secretsList(deps, { allScopes: true });
+    expect(entries).toEqual([
+      { scope: 'acme', name: 'DEPLOY_KEY' },
+      { scope: 'acme/api', name: 'NPM_TOKEN' },
+    ]);
+  });
+
   it('defaults the scope to the repo inferred from the origin remote', async () => {
     const { ssm, deps } = fixture({ inferRepo: async () => 'acme/web' });
     ssm.set('/millwright/prod/secrets/acme/web/DEPLOY_TOKEN', 'x', 'SecureString');

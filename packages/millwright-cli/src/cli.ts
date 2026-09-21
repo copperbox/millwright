@@ -14,7 +14,7 @@ import {
   RepoConfigFormatError,
   RunModelError,
 } from '@copperbox/millwright-state';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { CommandError, requireManifestResource } from './config-plane';
 import { DefinitionLoadError } from './definition-loader';
 import { DEPLOYMENT_ENV_VAR, Deployment, DiscoveryError, discoverDeployment } from './discovery';
@@ -536,7 +536,11 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
     .command('list')
     .description('list secret names for a scope (never values)')
     .option('--scope <scope>', 'secret scope; defaults to the repo of the cwd origin remote')
-    .option('--all-scopes', 'list every scope in the deployment instead of one')
+    .addOption(
+      new Option('--all-scopes', 'list every scope in the deployment instead of one').conflicts(
+        'scope',
+      ),
+    )
     .action(async (options: { scope?: string; allScopes?: boolean }) => {
       await secretsList(
         { ssm: new SSMClient({}), output },

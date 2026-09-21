@@ -66,6 +66,17 @@ describe('buildProgram', () => {
     expect(rm.registeredArguments.map((argument) => argument.name())).toEqual(['name']);
   });
 
+  it('secrets list rejects --all-scopes combined with --scope', async () => {
+    const fresh = buildProgram();
+    const list = fresh.commands
+      .find((command) => command.name() === 'secrets')!
+      .commands.find((command) => command.name() === 'list')!;
+    list.exitOverride().configureOutput({ writeErr: () => undefined });
+    await expect(
+      fresh.parseAsync(['secrets', 'list', '--all-scopes', '--scope', 'acme/api'], { from: 'user' }),
+    ).rejects.toThrow(/'--all-scopes' cannot be used with option '--scope/);
+  });
+
   it('setup takes the --pat fallback and App-creation options', () => {
     const setup = program.commands.find((command) => command.name() === 'setup')!;
     const flags = setup.options.map((option) => option.long);
