@@ -139,32 +139,29 @@ export async function secretsList(
 ): Promise<SecretsListEntry[]> {
   const deployment = await discoverDeployment(deps.ssm, options);
   const scope = options.allScopes ? undefined : await resolveScope(deps, options.scope);
-  const prefix =
-    scope === undefined
-      ? `${configPlaneRoot(deployment.name)}/secrets/`
-      : `${configPlaneRoot(deployment.name)}/secrets/${scope}/`;
+  const everyScope = scope === undefined;
+  const secretsRoot = `${configPlaneRoot(deployment.name)}/secrets/`;
+  const prefix = everyScope ? secretsRoot : `${secretsRoot}${scope}/`;
 
   const entries: SecretsListEntry[] = [];
   for (const parameter of await listParametersByPrefix(deps.ssm, prefix)) {
     const parts = secretFromParameterName(deployment.name, parameter.name);
     // A recursive listing of `…/secrets/acme/` also returns `acme/api`'s
     // secrets; keep only the scope asked for.
-    if (parts && (scope === undefined || parts.scope === scope)) {
+    if (parts && (everyScope || parts.scope === scope)) {
       entries.push(parts);
     }
   }
   entries.sort((a, b) => a.scope.localeCompare(b.scope) || a.name.localeCompare(b.name));
 
-  const where = scope === undefined ? 'every scope' : `scope ${scope}`;
+  const deploymentLabel = `(deployment "${deployment.name}")`;
   if (entries.length === 0) {
-    deps.output(
-      `No secrets in ${scope === undefined ? 'any scope' : where} (deployment "${deployment.name}").`,
-    );
+    deps.output(`No secrets in ${everyScope ? 'any scope' : `scope ${scope}`} ${deploymentLabel}.`);
     return entries;
   }
-  deps.output(`Secrets in ${where} (deployment "${deployment.name}"):`);
+  deps.output(`Secrets in ${everyScope ? 'every scope' : `scope ${scope}`} ${deploymentLabel}:`);
   for (const entry of entries) {
-    deps.output(scope === undefined ? `${entry.scope}  ${entry.name}` : entry.name);
+    deps.output(everyScope ? `${entry.scope}  ${entry.name}` : entry.name);
   }
   return entries;
 }
