@@ -104,3 +104,36 @@ export function secretParameterName(
   }
   return `${configPlaneRoot(deploymentName)}/secrets/${scope}/${secretName}`;
 }
+
+export interface SecretParameterParts {
+  readonly scope: string;
+  readonly name: string;
+}
+
+/**
+ * Inverse of `secretParameterName` for one deployment; undefined when the
+ * name is not one of its secret parameters. The scope is everything between
+ * the `/secrets/` prefix and the final segment, so `owner/repo` scopes and
+ * single-segment shared scopes both invert. `millwright secrets list`
+ * discovers secrets by listing the prefix and inverting each name.
+ */
+export function secretFromParameterName(
+  deploymentName: string,
+  parameterName: string,
+): SecretParameterParts | undefined {
+  const prefix = `${configPlaneRoot(deploymentName)}/secrets/`;
+  if (!parameterName.startsWith(prefix)) {
+    return undefined;
+  }
+  const rest = parameterName.slice(prefix.length);
+  const split = rest.lastIndexOf('/');
+  if (split <= 0) {
+    return undefined;
+  }
+  const scope = rest.slice(0, split);
+  const name = rest.slice(split + 1);
+  if (scope.startsWith('/') || scope.includes('//') || !isSecretNameSegment(name)) {
+    return undefined;
+  }
+  return { scope, name };
+}

@@ -421,9 +421,14 @@ Symptoms and levers:
 Secrets are gated at **dispatch**, by the decider, through job-role variant
 selection — not at synth time.
 
-1. **Is the secret written?** `millwright secrets set <name> [--scope <scope>]`
-   writes `/millwright/<name>/secrets/<scope>/<secret>`; the scope defaults to
-   the repo of the cwd's `origin` remote.
+1. **Is the secret written?** `millwright secrets list [--scope <scope>]`
+   prints the secret names in a scope (`--all-scopes` for every scope; values
+   are never shown). The scope defaults to the repo of the cwd's `origin`
+   remote, the same default `secrets set` and the dispatch-time `Secret`
+   lookup use — if the name is missing, or sits under a different scope than
+   the workflow resolves against, write it with `millwright secrets set <name>
+   [--scope <scope>]`. Retire one with `millwright secrets rm <name>
+   [--scope <scope>]`.
 2. **Does the ref qualify?** `secretsAllowedRefs` is unset by default, which
    means *no ref receives secrets*. Patterns match the **short** ref name
    (`main`, `release/1.2`), anchored at both ends, with `*` as the only

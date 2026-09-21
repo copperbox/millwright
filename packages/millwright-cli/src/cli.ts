@@ -42,7 +42,7 @@ import {
   runsShow,
   runsShowLocal,
 } from './runs';
-import { secretsSet } from './secrets';
+import { secretsList, secretsRm, secretsSet } from './secrets';
 import { SetupDeps, refreshHostKeys, setup } from './setup';
 import { DEFAULT_ENTRY, runSynthCommand } from './synth-command';
 import { VERSION } from './version';
@@ -528,6 +528,34 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
     .action(async (name: string, options: { scope?: string }) => {
       await secretsSet(
         { ssm: new SSMClient({}), output, promptSecret },
+        { name, scope: options.scope, explicitName: program.opts().deployment },
+      );
+    });
+
+  secrets
+    .command('list')
+    .description('list secret names for a scope (never values)')
+    .option('--scope <scope>', 'secret scope; defaults to the repo of the cwd origin remote')
+    .option('--all-scopes', 'list every scope in the deployment instead of one')
+    .action(async (options: { scope?: string; allScopes?: boolean }) => {
+      await secretsList(
+        { ssm: new SSMClient({}), output },
+        {
+          scope: options.scope,
+          allScopes: options.allScopes === true,
+          explicitName: program.opts().deployment,
+        },
+      );
+    });
+
+  secrets
+    .command('rm')
+    .description('delete one workflow secret')
+    .argument('<name>', 'secret name as given to "secrets set"')
+    .option('--scope <scope>', 'secret scope; defaults to the repo of the cwd origin remote')
+    .action(async (name: string, options: { scope?: string }) => {
+      await secretsRm(
+        { ssm: new SSMClient({}), output },
         { name, scope: options.scope, explicitName: program.opts().deployment },
       );
     });
