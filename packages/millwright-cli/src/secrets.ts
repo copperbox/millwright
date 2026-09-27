@@ -1,30 +1,61 @@
 /**
- * `millwright secrets set <name> [--scope <scope>]` (spec §9.2, §15): write
- * one workflow secret to `/millwright/<name>/secrets/<scope>/<NAME>` as a
- * SecureString under the deployment CMK. The scope defaults to the repo —
- * inferred from the working directory's `origin` remote — matching how
- * `Secret` references resolve at dispatch (§4.2); secrets flow only to runs
- * on `secretsAllowedRefs`-matched refs (§12a).
+ * `millwright secrets set|list|rm` (spec §9.2, §15): manage workflow secrets
+ * at `/millwright/<name>/secrets/<scope>/<NAME>`. `set` writes a SecureString
+ * under the deployment CMK; `list` shows the names in a scope (never values —
+ * the listing never asks SSM to decrypt); `rm` deletes one. The scope
+ * defaults to the repo — inferred from the working directory's `origin`
+ * remote — matching how `Secret` references resolve at dispatch (§4.2);
+ * secrets flow only to runs on `secretsAllowedRefs`-matched refs (§12a).
  */
 
 import { execFile } from 'node:child_process';
-import { isSecretNameSegment, secretParameterName } from '@copperbox/millwright-state';
-import { CommandError, configKeyId, putSecureStringParameter } from './config-plane';
+import {
+  SecretParameterParts,
+  configPlaneRoot,
+  isSecretNameSegment,
+  secretFromParameterName,
+  secretParameterName,
+} from '@copperbox/millwright-state';
+import {
+  CommandError,
+  configKeyId,
+  deleteParameters,
+  listParametersByPrefix,
+  putSecureStringParameter,
+} from './config-plane';
 import { DiscoverOptions, SsmClientLike, discoverDeployment } from './discovery';
 
-export interface SecretsDeps {
+/** What `secrets list` and `secrets rm` need; `set` additionally prompts. */
+export interface SecretsScopeDeps {
   readonly ssm: SsmClientLike;
   readonly output: (line: string) => void;
-  /** Reads the secret value without echoing. */
-  readonly promptSecret: (question: string) => Promise<string>;
   /** Injectable for tests. @default the cwd's `origin` remote */
   readonly inferRepo?: () => Promise<string | undefined>;
+}
+
+export interface SecretsDeps extends SecretsScopeDeps {
+  /** Reads the secret value without echoing. */
+  readonly promptSecret: (question: string) => Promise<string>;
 }
 
 export interface SecretsSetOptions extends DiscoverOptions {
   readonly name: string;
   readonly scope?: string;
 }
+
+export interface SecretsListOptions extends DiscoverOptions {
+  readonly scope?: string;
+  /** Enumerate every scope under the deployment instead of one. */
+  readonly allScopes?: boolean;
+}
+
+export interface SecretsRmOptions extends DiscoverOptions {
+  readonly name: string;
+  readonly scope?: string;
+}
+
+/** One row of `secrets list`: the inverted parameter name. */
+export type SecretsListEntry = SecretParameterParts;
 
 /** `owner/repo` from an SSH, ssh://, git://, or https GitHub remote URL. */
 export function parseGithubRemote(url: string): string | undefined {
@@ -44,26 +75,37 @@ async function originRepo(): Promise<string | undefined> {
   return url ? parseGithubRemote(url) : undefined;
 }
 
-export async function secretsSet(deps: SecretsDeps, options: SecretsSetOptions): Promise<void> {
-  // Pre-flight the shape `secretParameterName` accepts, before discovery and
-  // the value prompt. The env var a secret lands in is named by the
-  // workflow's record key, not by this parameter name, so kebab-case is fine.
-  if (!isSecretNameSegment(options.name)) {
+/**
+ * Pre-flight the shape `secretParameterName` accepts, before discovery (and,
+ * for `set`, the value prompt). The env var a secret lands in is named by the
+ * workflow's record key, not by this parameter name, so kebab-case is fine.
+ */
+function assertSecretName(name: string): void {
+  if (!isSecretNameSegment(name)) {
     throw new CommandError(
-      `"${options.name}" is not a secret name — it becomes one segment of the secret's ` +
+      `"${name}" is not a secret name — it becomes one segment of the secret's ` +
         'SSM parameter path, so it must match [A-Za-z0-9_.-]+ (no "/")',
     );
   }
-  const deployment = await discoverDeployment(deps.ssm, options);
-  const keyId = configKeyId(deployment);
+}
 
-  const scope = options.scope ?? (await (deps.inferRepo ?? originRepo)());
+/** `--scope` if given, else the cwd's `origin` repo; a CommandError when neither. */
+async function resolveScope(deps: SecretsScopeDeps, explicit: string | undefined): Promise<string> {
+  const scope = explicit ?? (await (deps.inferRepo ?? originRepo)());
   if (!scope) {
     throw new CommandError(
       'no --scope given and the working directory has no GitHub "origin" remote to default ' +
         'to — pass --scope <owner/repo> (or a shared scope name)',
     );
   }
+  return scope;
+}
+
+export async function secretsSet(deps: SecretsDeps, options: SecretsSetOptions): Promise<void> {
+  assertSecretName(options.name);
+  const deployment = await discoverDeployment(deps.ssm, options);
+  const keyId = configKeyId(deployment);
+  const scope = await resolveScope(deps, options.scope);
 
   const value = await deps.promptSecret(`Value for ${options.name} (input hidden): `);
   if (!value) {
@@ -83,4 +125,58 @@ export async function secretsSet(deps: SecretsDeps, options: SecretsSetOptions):
     'Runs consume it via a Secret reference; it flows only to runs on refs matched by the ' +
       "repo's secretsAllowedRefs.",
   );
+}
+
+/**
+ * Names only. `GetParametersByPath` without `WithDecryption` hands back
+ * SecureStrings as ciphertext, and this never looks at `value` at all — there
+ * is deliberately no way to read a secret back through the CLI.
+ */
+export async function secretsList(
+  deps: SecretsScopeDeps,
+  options: SecretsListOptions = {},
+): Promise<SecretsListEntry[]> {
+  const deployment = await discoverDeployment(deps.ssm, options);
+  const scope = options.allScopes ? undefined : await resolveScope(deps, options.scope);
+  const everyScope = scope === undefined;
+  const secretsRoot = `${configPlaneRoot(deployment.name)}/secrets/`;
+  const prefix = everyScope ? secretsRoot : `${secretsRoot}${scope}/`;
+
+  const entries: SecretsListEntry[] = [];
+  for (const parameter of await listParametersByPrefix(deps.ssm, prefix)) {
+    const parts = secretFromParameterName(deployment.name, parameter.name);
+    // A recursive listing of `…/secrets/acme/` also returns `acme/api`'s
+    // secrets; keep only the scope asked for.
+    if (parts && (everyScope || parts.scope === scope)) {
+      entries.push(parts);
+    }
+  }
+  entries.sort((a, b) => a.scope.localeCompare(b.scope) || a.name.localeCompare(b.name));
+
+  const deploymentLabel = `(deployment "${deployment.name}")`;
+  if (entries.length === 0) {
+    deps.output(`No secrets in ${everyScope ? 'any scope' : `scope ${scope}`} ${deploymentLabel}.`);
+    return entries;
+  }
+  deps.output(`Secrets in ${everyScope ? 'every scope' : `scope ${scope}`} ${deploymentLabel}:`);
+  for (const entry of entries) {
+    deps.output(everyScope ? `${entry.scope}  ${entry.name}` : entry.name);
+  }
+  return entries;
+}
+
+export async function secretsRm(deps: SecretsScopeDeps, options: SecretsRmOptions): Promise<void> {
+  assertSecretName(options.name);
+  const deployment = await discoverDeployment(deps.ssm, options);
+  const scope = await resolveScope(deps, options.scope);
+
+  const parameter = secretParameterName(deployment.name, scope, options.name);
+  const deleted = await deleteParameters(deps.ssm, [parameter]);
+  if (deleted.length === 0) {
+    throw new CommandError(
+      `no secret named ${options.name} in scope ${scope} (deployment "${deployment.name}") — ` +
+        `"millwright secrets list --scope ${scope}" shows what exists`,
+    );
+  }
+  deps.output(`Deleted ${parameter} (scope ${scope}).`);
 }

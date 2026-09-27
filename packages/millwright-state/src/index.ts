@@ -180,6 +180,8 @@ export {
   manifestParameterName,
   repoConfigParameterName,
   repoFromConfigParameterName,
+  SecretParameterParts,
+  secretFromParameterName,
   secretParameterName,
 } from './ssm-paths';
 export {

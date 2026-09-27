@@ -8,6 +8,7 @@ import {
   manifestParameterName,
   repoConfigParameterName,
   repoFromConfigParameterName,
+  secretFromParameterName,
   secretParameterName,
 } from '../src';
 
@@ -38,6 +39,24 @@ describe('SSM config-plane paths', () => {
     expect(repoFromConfigParameterName(NAME, '/millwright/ci-platform/repos//config')).toBeUndefined();
     expect(
       repoFromConfigParameterName('other', repoConfigParameterName(NAME, REPO)),
+    ).toBeUndefined();
+  });
+
+  it('inverts secret parameter names into scope + name for secrets list', () => {
+    expect(secretFromParameterName(NAME, secretParameterName(NAME, REPO, 'NPM_TOKEN'))).toEqual({
+      scope: REPO,
+      name: 'NPM_TOKEN',
+    });
+    expect(secretFromParameterName(NAME, secretParameterName(NAME, 'shared', 'HOOK'))).toEqual({
+      scope: 'shared',
+      name: 'HOOK',
+    });
+    expect(secretFromParameterName(NAME, deployKeyParameterName(NAME, REPO))).toBeUndefined();
+    expect(secretFromParameterName(NAME, '/millwright/ci-platform/secrets/NPM_TOKEN')).toBeUndefined();
+    expect(secretFromParameterName(NAME, '/millwright/ci-platform/secrets//X')).toBeUndefined();
+    expect(secretFromParameterName(NAME, '/millwright/ci-platform/secrets/a/')).toBeUndefined();
+    expect(
+      secretFromParameterName('other', secretParameterName(NAME, REPO, 'NPM_TOKEN')),
     ).toBeUndefined();
   });
 

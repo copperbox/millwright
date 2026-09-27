@@ -151,6 +151,16 @@ as a SecureString under the deployment CMK. The scope defaults to the repo of
 the working directory's `origin` remote; secrets flow only to runs on refs
 matched by the repo's `secretsAllowedRefs`.
 
+`millwright secrets list [--scope <scope>]` prints the secret **names** in a
+scope, sorted — never their values; there is no way to read a value back
+through the CLI. `--all-scopes` enumerates every scope in the deployment
+instead, one `<scope>  <name>` line each.
+
+`millwright secrets rm <name> [--scope <scope>]` deletes one secret and
+reports the parameter path it removed; it fails with a non-zero exit when no
+such secret exists in that scope. Use it when a repo is offboarded or a secret
+is retired so the SecureString does not linger in the config plane.
+
 `millwright refresh-host-keys` re-pins GitHub's SSH host keys from the
 `/meta` endpoint — the manual hatch for confirmed key rotations. The poller
 honors the new pins on its next tick.
