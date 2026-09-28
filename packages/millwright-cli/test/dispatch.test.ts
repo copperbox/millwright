@@ -13,6 +13,8 @@ import { SsmClientLike } from '../src/discovery';
 const SHA_MAIN = 'a'.repeat(40);
 const SHA_TAG = 'b'.repeat(40);
 const SHA_DEV = 'c'.repeat(40);
+const SHA_LIB = 'd'.repeat(40);
+const SHA_LIB_DEV = 'e'.repeat(40);
 
 function fakeSsm(): SsmClientLike {
   const manifest = {
@@ -44,21 +46,54 @@ const REMOTE_REFS: Record<string, string> = {
   'refs/tags/v1': SHA_TAG,
 };
 
-function fakeGit(remoteUrl = 'git@github.com:octo/app.git') {
+/** ls-remote fixture for octo/lib: trunk is the default branch; no v1 tag. */
+const LIB_REFS: Record<string, string> = {
+  'refs/heads/trunk': SHA_LIB,
+  'refs/heads/dev': SHA_LIB_DEV,
+};
+
+interface FakeRemote {
+  readonly defaultBranch: string;
+  readonly refs: Record<string, string>;
+}
+
+const OCTO_APP: FakeRemote = { defaultBranch: 'main', refs: REMOTE_REFS };
+const OCTO_LIB: FakeRemote = { defaultBranch: 'trunk', refs: LIB_REFS };
+
+/**
+ * Remotes ls-remote can reach, keyed by the remote name or URL git is given.
+ * `origin` serves octo/app; the octo/lib URLs serve octo/lib in both transports.
+ */
+const REMOTES: Record<string, FakeRemote> = {
+  origin: OCTO_APP,
+  'git@github.com:octo/lib.git': OCTO_LIB,
+  'https://github.com/octo/lib.git': OCTO_LIB,
+};
+
+/** `remoteUrl: undefined` means there is no checkout: `git remote` fails. */
+function fakeGit(remoteUrl: string | undefined) {
   const calls: string[][] = [];
   const runGit = async (args: readonly string[]): Promise<string> => {
     calls.push([...args]);
     if (args[0] === 'remote') {
+      if (remoteUrl === undefined) {
+        throw new DispatchError('git remote failed: fatal: not a git repository');
+      }
       return `${remoteUrl}\n`;
     }
     if (args[0] === 'ls-remote') {
+      const remote = REMOTES[args[2]];
+      if (!remote) {
+        throw new DispatchError(`git ls-remote failed: fatal: repository '${args[2]}' not found`);
+      }
+      const head = `refs/heads/${remote.defaultBranch}`;
       const patterns = args.slice(3);
       const lines: string[] = [];
       for (const pattern of patterns) {
         if (pattern === 'HEAD') {
-          lines.push('ref: refs/heads/main\tHEAD', `${SHA_MAIN}\tHEAD`);
-        } else if (REMOTE_REFS[pattern]) {
-          lines.push(`${REMOTE_REFS[pattern]}\t${pattern}`);
+          lines.push(`ref: ${head}\tHEAD`, `${remote.refs[head]}\tHEAD`);
+        } else if (remote.refs[pattern]) {
+          lines.push(`${remote.refs[pattern]}\t${pattern}`);
         }
       }
       return `${lines.join('\n')}\n`;
@@ -76,15 +111,23 @@ function registryEntry(
   return { ...registryKey(repo, ref), repo, ref, schemaVersion: 1, workflows };
 }
 
+/** The remote name or URL each `git ls-remote` call was pointed at. */
+function lsRemoteTargets(calls: readonly string[][]): string[] {
+  return calls.filter((c) => c[0] === 'ls-remote').map((c) => c[2]);
+}
+
 const MANUAL_ONLY = {
   deploy: { triggers: [{ kind: 'manual', inputs: {} }] },
 };
 
 function harness(options?: {
-  remoteUrl?: string;
+  /** Default: the octo/app SSH origin; `null` means no checkout at all. */
+  remoteUrl?: string | null;
   entries?: Map<string, RegistryItem>;
 }) {
-  const { runGit, calls } = fakeGit(options?.remoteUrl);
+  const remoteUrl =
+    options?.remoteUrl === null ? undefined : (options?.remoteUrl ?? 'git@github.com:octo/app.git');
+  const { runGit, calls } = fakeGit(remoteUrl);
   const entries =
     options?.entries ?? new Map([['octo/app|refs/heads/main', registryEntry(MANUAL_ONLY)]]);
   const put: { busName: string; detail: BusEventDetail }[] = [];
@@ -288,13 +331,87 @@ describe('dispatch', () => {
   });
 
   it('honours --repo over the origin remote and rejects unparseable remotes', async () => {
-    const { deps, put } = harness({
+    const { deps, put, calls } = harness({
       remoteUrl: 'https://example.com/elsewhere.git',
-      entries: new Map([['octo/lib|refs/heads/main', registryEntry(MANUAL_ONLY, 'octo/lib')]]),
+      entries: new Map([
+        ['octo/lib|refs/heads/trunk', registryEntry(MANUAL_ONLY, 'octo/lib', 'refs/heads/trunk')],
+      ]),
     });
     await expect(dispatch({ workflow: 'deploy' }, deps)).rejects.toThrow(/origin remote/);
     await dispatch({ workflow: 'deploy', repo: 'octo/lib' }, deps);
-    expect(put[0].detail.repo).toBe('octo/lib');
+    expect(put[0].detail).toMatchObject({
+      repo: 'octo/lib',
+      ref: 'refs/heads/trunk',
+      sha: SHA_LIB,
+      defaultBranch: 'trunk',
+    });
+    expect(lsRemoteTargets(calls)).toEqual(['https://github.com/octo/lib.git']);
+  });
+
+  it('resolves --repo against the named repo from a checkout of a different one', async () => {
+    const { deps, put, calls, registryReads } = harness({
+      entries: new Map([
+        ['octo/lib|refs/heads/trunk', registryEntry(MANUAL_ONLY, 'octo/lib', 'refs/heads/trunk')],
+      ]),
+    });
+    await dispatch({ workflow: 'deploy', repo: 'octo/lib', ref: 'dev' }, deps);
+    expect(put[0].detail).toEqual({
+      repo: 'octo/lib',
+      ref: 'refs/heads/dev',
+      sha: SHA_LIB_DEV,
+      kind: 'dispatch',
+      defaultBranch: 'trunk',
+      workflow: 'deploy',
+    });
+    // An SSH origin picks the SSH form of the named repo.
+    expect(lsRemoteTargets(calls)).toEqual(['git@github.com:octo/lib.git']);
+    // The default-branch fallback is the named repo's, not origin's.
+    expect(registryReads).toEqual([
+      'ci-state|octo/lib|refs/heads/dev',
+      'ci-state|octo/lib|refs/heads/trunk',
+    ]);
+  });
+
+  it('dispatches with --repo from outside any checkout', async () => {
+    const { deps, put, calls } = harness({
+      remoteUrl: null,
+      entries: new Map([
+        ['octo/lib|refs/heads/trunk', registryEntry(MANUAL_ONLY, 'octo/lib', 'refs/heads/trunk')],
+      ]),
+    });
+    await expect(dispatch({ workflow: 'deploy' }, deps)).rejects.toThrow(/--repo/);
+    await dispatch({ workflow: 'deploy', repo: 'octo/lib' }, deps);
+    expect(put[0].detail).toMatchObject({ repo: 'octo/lib', sha: SHA_LIB });
+    expect(lsRemoteTargets(calls)).toEqual(['https://github.com/octo/lib.git']);
+  });
+
+  it('uses origin when --repo names the checked-out repo', async () => {
+    const { deps, put, calls } = harness();
+    await dispatch({ workflow: 'deploy', repo: 'octo/app' }, deps);
+    expect(put[0].detail).toMatchObject({ repo: 'octo/app', sha: SHA_MAIN });
+    expect(lsRemoteTargets(calls)).toEqual(['origin']);
+  });
+
+  it('fails naming an unreachable --repo instead of falling back to origin', async () => {
+    const { deps, put, calls } = harness();
+    await expect(dispatch({ workflow: 'deploy', repo: 'octo/private' }, deps)).rejects.toThrow(
+      /octo\/private[^]*run from a checkout/,
+    );
+    await expect(dispatch({ workflow: 'deploy', repo: 'octo/private' }, deps)).rejects.toThrow(
+      DispatchError,
+    );
+    expect(put).toEqual([]);
+    expect(lsRemoteTargets(calls)).toEqual([
+      'git@github.com:octo/private.git',
+      'git@github.com:octo/private.git',
+    ]);
+  });
+
+  it('names the repo when --ref is missing on the named repo', async () => {
+    const { deps } = harness();
+    await expect(
+      dispatch({ workflow: 'deploy', repo: 'octo/lib', ref: 'v1' }, deps),
+    ).rejects.toThrow(/not found on octo\/lib/);
   });
 
   it('fails cleanly when the manifest lacks the bus or state-table resources', async () => {
