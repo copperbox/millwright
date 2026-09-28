@@ -23,7 +23,7 @@ import { DoctorDeps, doctor } from './doctor';
 import { GitProtocolError } from './git/ls-refs';
 import { HostKeyMismatchError } from './git/ssh';
 import { GithubApiError } from './github/rest';
-import { init } from './init';
+import { init, initNextSteps } from './init';
 import { DockerExecutor, createDockerProcessRunner } from './local/executor';
 import { isLocalRunId } from './local/local-layout';
 import { DEFAULT_DEFINITION_ENTRY, LocalRunDeps, localRun } from './local/local-run';
@@ -196,7 +196,7 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
             'before deploying to anything you care about.\n',
         );
       }
-      process.stdout.write('Next: npm install && npx cdk deploy, then npx millwright setup.\n');
+      process.stdout.write(`${initNextSteps(result.directory)}\n`);
     });
 
   program
