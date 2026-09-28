@@ -102,6 +102,8 @@ interface DispatchRemote {
   readonly label: string;
 }
 
+const ORIGIN_REMOTE: DispatchRemote = { target: 'origin', label: 'origin' };
+
 /** `git@host:…` and `ssh://…` remote forms. */
 function isSshRemoteUrl(url: string): boolean {
   return /^ssh:\/\//.test(url) || /^[^/@:]+@[^/:]+:/.test(url);
@@ -146,10 +148,10 @@ async function selectRemote(
           'run from a checkout of the watched repo or pass --repo <owner/name>',
       );
     }
-    return { repo, remote: { target: 'origin', label: 'origin' } };
+    return { repo, remote: ORIGIN_REMOTE };
   }
   if (originUrl !== undefined && repoFromRemoteUrl(originUrl) === repoOption) {
-    return { repo: repoOption, remote: { target: 'origin', label: 'origin' } };
+    return { repo: repoOption, remote: ORIGIN_REMOTE };
   }
   const target =
     originUrl !== undefined && isSshRemoteUrl(originUrl)
