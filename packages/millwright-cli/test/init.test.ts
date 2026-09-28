@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { init } from '../src';
+import { VERSION } from '../src/version';
 
 let dir: string;
 
@@ -33,6 +34,10 @@ describe('millwright init', () => {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     expect(pkg.dependencies['@copperbox/millwright-cdk']).toMatch(/^\^\d+\.\d+\.\d+$/);
     expect(pkg.dependencies['aws-cdk-lib']).toBeDefined();
+    // The CLI rides along so `npx millwright setup` resolves inside the app
+    // directory instead of falling through to the unscoped npm package.
+    expect(pkg.devDependencies['@copperbox/millwright-cli']).toBe(`^${VERSION}`);
+    expect(pkg.dependencies['@copperbox/millwright-cli']).toBeUndefined();
   });
 
   it('inlines a provided permissions boundary ARN', () => {

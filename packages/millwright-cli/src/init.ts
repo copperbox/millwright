@@ -74,7 +74,11 @@ function scaffoldFiles(options: InitOptions): Record<string, string> {
           'aws-cdk-lib': '^2.170.0',
           constructs: '^10.4.0',
         },
+        // The CLI is a devDependency so `npx millwright setup` resolves to
+        // this project's binary inside the app directory. Without it, npx
+        // falls through to the unrelated unscoped `millwright` npm package.
         devDependencies: {
+          '@copperbox/millwright-cli': `^${VERSION}`,
           'aws-cdk': '^2.170.0',
           'ts-node': '^10.9.0',
           typescript: '~5.7.0',

@@ -196,7 +196,7 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
             'before deploying to anything you care about.\n',
         );
       }
-      process.stdout.write('Next: npm install && npx cdk deploy, then millwright setup.\n');
+      process.stdout.write('Next: npm install && npx cdk deploy, then npx millwright setup.\n');
     });
 
   program
