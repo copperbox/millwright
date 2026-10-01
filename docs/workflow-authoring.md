@@ -25,7 +25,9 @@ npm install --save-dev @copperbox/millwright-workflows
 ```
 
 The package has zero runtime dependencies and deliberately does not depend on `aws-cdk-lib`.
-It is the only millwright package a watched repo installs.
+It is the only millwright package a watched repo needs. `@copperbox/millwright-cli` is an
+optional second devDependency for running synth locally (see [Synth](#synth)); it never
+affects cloud runs.
 
 ## The object model
 
@@ -494,8 +496,16 @@ re-synth, so a rerun reproduces the original definition even if the branch has m
 ## Synth
 
 ```sh
-npx millwright synth                     # model to stdout, diagnostics to stderr
-npx millwright synth --pretty --out model.json
+npx @copperbox/millwright-cli synth                     # model to stdout, diagnostics to stderr
+npx @copperbox/millwright-cli synth --pretty --out model.json
+```
+
+The scoped form works with nothing installed. To shorten it to `npx millwright synth`, add
+the CLI as a devDependency — bare `npx millwright` without it resolves to an unrelated
+`millwright` package on npm, not this project:
+
+```sh
+npm install --save-dev @copperbox/millwright-cli
 ```
 
 `millwright synth` loads `millwright/workflows.ts` in-process, compiles the `WorkflowSet` to the
@@ -552,8 +562,9 @@ check created `in_progress` at run start, which fails with the synth error in it
 those contexts to branch protection (not `millwright / synth`, which only bootstrap executions
 report).
 
-Locally, treat synth as a lint: run `npx millwright synth --out /dev/null` in a pre-commit hook
-or as a job in the workflow itself. `--ref` plus `--secrets-allowed-refs` matching your repo
+Locally, treat synth as a lint: with `@copperbox/millwright-cli` installed as a devDependency,
+run `npx millwright synth --out /dev/null` in a pre-commit hook or as a job in the workflow
+itself. `--ref` plus `--secrets-allowed-refs` matching your repo
 config turns the secrets gate into a local check too. And `millwright run <workflow>` executes
 the whole thing locally against docker — same synth, same buildspec renderer, same decider — so
 a definition that runs locally is a definition that synths.

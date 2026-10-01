@@ -65,7 +65,13 @@ files: the CDK app proper is `app.ts` + `cdk.json` (`{"app": "npx ts-node
 app.ts"}`); `package.json`, `tsconfig.json` and `.gitignore` are npm plumbing so
 `npm install && npx cdk deploy` works unchanged. The generated `package.json`
 pins `aws-cdk-lib` and the `aws-cdk` CLI at `^2.170.0` (the construct's own peer
-floor is `^2.100.0`).
+floor is `^2.100.0`), and adds `@copperbox/millwright-cli` as a devDependency at
+the construct's version so `npx millwright <cmd>` resolves to this project's
+CLI inside the app directory. The rest of this guide writes `millwright <cmd>`:
+run it as `npx millwright <cmd>` from the app directory, or install it globally
+with `npm install -g @copperbox/millwright-cli` to use it from anywhere. Bare
+`npx millwright` outside a directory that installs the scoped package resolves
+to an unrelated `millwright` package on npm.
 
 If you omit `--permissions-boundary`, `init` scaffolds `Boundary.NONE` with a
 TODO comment and prints a warning. That deploys, but every job role is then

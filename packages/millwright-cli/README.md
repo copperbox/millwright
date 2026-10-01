@@ -4,11 +4,18 @@ The `millwright` command, for operator and developer machines. npx-able.
 
 ```sh
 npx @copperbox/millwright-cli init   # scaffold the two-file CDK deployment app
-millwright setup                     # create the GitHub App, pin host keys
-millwright repo add acme/api         # onboard a repo end to end
-millwright synth                     # compile millwright/workflows.ts to the JSON run model
-millwright doctor                    # verify the deployment chain
+npm install && npx cdk deploy        # deploy it; the scaffold pins this CLI as a devDependency
+npx millwright setup                 # create the GitHub App, pin host keys
+npx millwright repo add acme/api     # onboard a repo end to end
+npx millwright synth                 # compile millwright/workflows.ts to the JSON run model
+npx millwright doctor                # verify the deployment chain
 ```
+
+`npx millwright` resolves to this package only where it is installed — the
+scaffolded CDK app, a watched repo that adds it as a devDependency, or after
+`npm install -g @copperbox/millwright-cli`. Elsewhere it resolves to an
+unrelated `millwright` package on npm; use `npx @copperbox/millwright-cli <cmd>`
+there.
 
 `millwright synth` loads the repo's `millwright/workflows.ts` in-process (no
 build step needed in the watched repo), derives repo/commit from git when

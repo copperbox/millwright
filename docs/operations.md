@@ -521,18 +521,20 @@ template. In your CDK app directory:
 
 ```sh
 npm install @copperbox/millwright-cdk@latest
+npm install --save-dev @copperbox/millwright-cli@latest
 npx cdk diff
 npx cdk deploy
-millwright doctor
+npx millwright doctor
 ```
 
-Then bring the CLI to the same version (`npm install -g
-@copperbox/millwright-cli@latest`, or just `npx @copperbox/millwright-cli`).
-After deploying, re-read the manifest: `version` and `schemaVersion` are
-recorded there, and `schemaVersion` is what governs which
-`millwright-workflows` library versions watched repos may use. A bump can
-require watched repos to update their dependency; the failure mode if they do
-not is a synth failure with the schema check in its summary.
+The second line brings the CLI the scaffold pinned as a devDependency to the
+same version as the construct; a globally installed CLI is upgraded with
+`npm install -g @copperbox/millwright-cli@latest` instead. After deploying,
+re-read the manifest: `version` and `schemaVersion` are recorded there, and
+`schemaVersion` is what governs which `millwright-workflows` library versions
+watched repos may use. A bump can require watched repos to update their
+dependency; the failure mode if they do not is a synth failure with the schema
+check in its summary.
 
 Nothing in the upgrade path resumes in-flight runs specially — the decider
 reconciles from table state and `BatchGetBuilds` on every entry, so a deploy
