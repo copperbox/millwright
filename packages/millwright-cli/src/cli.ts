@@ -398,7 +398,10 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
       (value: string, previous: string[]) => [...previous, value],
       [] as string[],
     )
-    .option('--repo <owner/name>', 'repo override when not run from a checkout of it')
+    .option(
+      '--repo <owner/name>',
+      'repo override when not run from a checkout of it; the ref is resolved against that repo',
+    )
     .action(async (workflow: string, options: { ref?: string; input: string[]; repo?: string }) => {
       await dispatch(
         {

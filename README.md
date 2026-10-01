@@ -142,9 +142,12 @@ run — the latest matching minute in the gap — never the whole backlog.
 millwright dispatch <workflow> [--ref <ref>] [--input k=v ...]
 ```
 
-Runs from a checkout of the watched repo (or pass `--repo owner/name`). The
-ref defaults to the default-branch head and is resolved to a sha before the
-event is emitted, pinning definition and source together. Inputs are typed
+Runs from a checkout of the watched repo, or from anywhere with
+`--repo owner/name`. The ref defaults to the default-branch head and is
+resolved to a sha before the event is emitted, pinning definition and source
+together; with `--repo` it is resolved against that repo (over SSH when the
+current checkout's `origin` uses SSH, otherwise HTTPS), never against an
+unrelated local `origin`. Inputs are typed
 against the workflow's `Trigger.manual` declaration — choices are validated,
 booleans take `true`/`false`, and a choice input with no default must be
 supplied or the dispatch fails before any event is emitted. The event goes

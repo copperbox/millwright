@@ -23,10 +23,12 @@ import { SsmClientLike, discoverDeployment } from './discovery';
  * launcher path, no special lane.
  *
  * A dispatch always carries a ref (default: the default-branch head),
- * resolved to a sha via `git ls-remote` against the checkout's `origin`
- * remote so definition and source are both pinned at that ref. Inputs are
- * typed (choices/booleans) against the workflow's `Trigger.manual`
- * declaration in the registry.
+ * resolved to a sha via `git ls-remote` so definition and source are both
+ * pinned at that ref. Without `--repo` the checkout's `origin` is both the
+ * repo and the remote; with `--repo` the ref is resolved against the named
+ * repo itself, so the command works from anywhere. Inputs are typed
+ * (choices/booleans) against the workflow's `Trigger.manual` declaration in
+ * the registry.
  */
 
 export class DispatchError extends Error {}
@@ -54,7 +56,10 @@ export interface DispatchOptions {
   readonly inputs?: readonly string[];
   /** Explicit deployment selection (`--deployment` / MILLWRIGHT_DEPLOYMENT). */
   readonly deployment?: string;
-  /** Repo override; default: parsed from the checkout's `origin` remote. */
+  /**
+   * Repo override; default: parsed from the checkout's `origin` remote. When
+   * given, refs are resolved against this repo rather than `origin`.
+   */
   readonly repo?: string;
 }
 
@@ -89,6 +94,72 @@ export function parseInputArgs(args: readonly string[]): Record<string, string> 
   return inputs;
 }
 
+/** Where `git ls-remote` resolves refs for a dispatch. */
+interface DispatchRemote {
+  /** The remote name (`origin`) or URL handed to `git ls-remote`. */
+  readonly target: string;
+  /** How messages name it: `origin`, or `owner/name` for a `--repo` target. */
+  readonly label: string;
+}
+
+const ORIGIN_REMOTE: DispatchRemote = { target: 'origin', label: 'origin' };
+
+/** `git@host:…` and `ssh://…` remote forms. */
+function isSshRemoteUrl(url: string): boolean {
+  return /^ssh:\/\//.test(url) || /^[^/@:]+@[^/:]+:/.test(url);
+}
+
+/** `origin`'s URL, or undefined outside a checkout (or with no `origin`). */
+async function originRemoteUrl(runGit: GitRunner): Promise<string | undefined> {
+  try {
+    return (await runGit(['remote', 'get-url', 'origin'])).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pick the repo and the remote to resolve its refs against. Without `--repo`
+ * both come from the checkout's `origin`. With `--repo`, `origin` is used
+ * only when it already points at that repo (so remote-scoped git config still
+ * applies); otherwise the named repo's own GitHub URL, in the transport the
+ * local `origin` uses — HTTPS when there is no checkout at all — so a
+ * checkout of the target is never required.
+ */
+async function selectRemote(
+  runGit: GitRunner,
+  repoOption: string | undefined,
+): Promise<{ readonly repo: string; readonly remote: DispatchRemote }> {
+  if (repoOption !== undefined && !REPO_PATTERN.test(repoOption)) {
+    throw new DispatchError(`--repo must be "owner/name", got "${repoOption}"`);
+  }
+  const originUrl = await originRemoteUrl(runGit);
+  if (repoOption === undefined) {
+    if (originUrl === undefined) {
+      throw new DispatchError(
+        'no origin remote here (not a git checkout?) — ' +
+          'run from a checkout of the watched repo or pass --repo <owner/name>',
+      );
+    }
+    const repo = repoFromRemoteUrl(originUrl);
+    if (!repo) {
+      throw new DispatchError(
+        `could not infer a GitHub repo from the origin remote ("${originUrl}") — ` +
+          'run from a checkout of the watched repo or pass --repo <owner/name>',
+      );
+    }
+    return { repo, remote: ORIGIN_REMOTE };
+  }
+  if (originUrl !== undefined && repoFromRemoteUrl(originUrl) === repoOption) {
+    return { repo: repoOption, remote: ORIGIN_REMOTE };
+  }
+  const target =
+    originUrl !== undefined && isSshRemoteUrl(originUrl)
+      ? `git@github.com:${repoOption}.git`
+      : `https://github.com/${repoOption}.git`;
+  return { repo: repoOption, remote: { target, label: repoOption } };
+}
+
 interface ResolvedRef {
   readonly ref: string;
   readonly sha: string;
@@ -100,14 +171,33 @@ interface ResolvedRef {
  * names the default branch, and the candidate patterns (exact full ref, or
  * `refs/heads/` then `refs/tags/` for a short name) pin the target sha.
  */
-async function resolveRef(runGit: GitRunner, refOption: string | undefined): Promise<ResolvedRef> {
+async function resolveRef(
+  runGit: GitRunner,
+  remote: DispatchRemote,
+  refOption: string | undefined,
+): Promise<ResolvedRef> {
   let candidates: string[] = [];
   if (refOption !== undefined) {
     candidates = refOption.startsWith('refs/')
       ? [refOption]
       : [`${BRANCH_REF_PREFIX}${refOption}`, `refs/tags/${refOption}`];
   }
-  const output = await runGit(['ls-remote', '--symref', 'origin', 'HEAD', ...candidates]);
+  let output: string;
+  try {
+    output = await runGit(['ls-remote', '--symref', remote.target, 'HEAD', ...candidates]);
+  } catch (err) {
+    if (remote.target === 'origin') {
+      throw err;
+    }
+    // A --repo target that isn't the checkout's origin: name it rather than
+    // quietly resolving against whatever origin is — that would pin the
+    // dispatch to another repository's commit.
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new DispatchError(
+      `could not list refs of ${remote.label} at ${remote.target} (${reason}) — ` +
+        `check the repo name and your git access to it, or run from a checkout of ${remote.label}`,
+    );
+  }
 
   let defaultBranch: string | undefined;
   const shas = new Map<string, string>();
@@ -129,7 +219,7 @@ async function resolveRef(runGit: GitRunner, refOption: string | undefined): Pro
     const headSha = shas.get('HEAD');
     if (!defaultBranch || !headSha) {
       throw new DispatchError(
-        'could not resolve the default-branch head from origin (empty repository?); ' +
+        `could not resolve the default-branch head from ${remote.label} (empty repository?); ` +
           'pass --ref explicitly',
       );
     }
@@ -142,7 +232,7 @@ async function resolveRef(runGit: GitRunner, refOption: string | undefined): Pro
     }
   }
   throw new DispatchError(
-    `ref "${refOption}" not found on origin (tried ${candidates.join(', ')})`,
+    `ref "${refOption}" not found on ${remote.label} (tried ${candidates.join(', ')})`,
   );
 }
 
@@ -270,21 +360,8 @@ export async function dispatch(options: DispatchOptions, deps: DispatchDeps): Pr
   }
   const rawInputs = parseInputArgs(options.inputs ?? []);
 
-  let repo = options.repo;
-  if (repo === undefined) {
-    const remoteUrl = (await deps.runGit(['remote', 'get-url', 'origin'])).trim();
-    repo = repoFromRemoteUrl(remoteUrl);
-    if (!repo) {
-      throw new DispatchError(
-        `could not infer a GitHub repo from the origin remote ("${remoteUrl}") — ` +
-          'run from a checkout of the watched repo or pass --repo <owner/name>',
-      );
-    }
-  } else if (!REPO_PATTERN.test(repo)) {
-    throw new DispatchError(`--repo must be "owner/name", got "${repo}"`);
-  }
-
-  const resolved = await resolveRef(deps.runGit, options.ref);
+  const { repo, remote } = await selectRemote(deps.runGit, options.repo);
+  const resolved = await resolveRef(deps.runGit, remote, options.ref);
   const deployment = await discoverDeployment(deps.ssm, { explicitName: options.deployment });
   const resources = deployment.manifest.resources as
     | { eventBus?: unknown; stateTable?: unknown }
