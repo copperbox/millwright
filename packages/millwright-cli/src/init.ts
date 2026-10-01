@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { VERSION } from './version';
 
 export interface InitOptions {
@@ -74,7 +74,11 @@ function scaffoldFiles(options: InitOptions): Record<string, string> {
           'aws-cdk-lib': '^2.170.0',
           constructs: '^10.4.0',
         },
+        // The CLI is a devDependency so `npx millwright setup` resolves to
+        // this project's binary inside the app directory. Without it, npx
+        // falls through to the unrelated unscoped `millwright` npm package.
         devDependencies: {
+          '@copperbox/millwright-cli': `^${VERSION}`,
           'aws-cdk': '^2.170.0',
           'ts-node': '^10.9.0',
           typescript: '~5.7.0',
@@ -122,4 +126,27 @@ export function init(options: InitOptions = {}): InitResult {
     writeFileSync(join(directory, name), contents);
   }
   return { directory, files: Object.keys(files) };
+}
+
+/**
+ * Single-quotes `value` for a POSIX shell unless it is made only of characters
+ * no shell treats specially, so a pasted `cd` lands in the right directory
+ * even when the path has spaces or `$`.
+ */
+function shellQuote(value: string): string {
+  return /^[A-Za-z0-9._/\-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The one-line "Next:" hint printed after `init`. Every listed command runs
+ * inside the scaffold, so when `directory` is anywhere other than the current
+ * one the hint starts with a `cd` into it. Without that step a user who ran
+ * `millwright init deploy` would install and deploy whatever project the
+ * parent directory holds, and `npx millwright` there could resolve to the
+ * unrelated unscoped package.
+ */
+export function initNextSteps(directory: string): string {
+  const inScaffold = directory === '.' || resolve(directory) === resolve('.');
+  const cd = inScaffold ? '' : `cd ${shellQuote(directory)} && `;
+  return `Next: ${cd}npm install && npx cdk deploy, then npx millwright setup.`;
 }

@@ -28,7 +28,7 @@ lockstep with a single version:
 
 | Package | What | Installed where |
 |---|---|---|
-| [`@copperbox/millwright-workflows`](packages/millwright-workflows) | Workflow definition library. Zero dependencies — never pulls in `aws-cdk-lib`. | The only install in watched repos. |
+| [`@copperbox/millwright-workflows`](packages/millwright-workflows) | Workflow definition library. Zero dependencies — never pulls in `aws-cdk-lib`. | The only required install in watched repos. |
 | [`@copperbox/millwright-cdk`](packages/millwright-cdk) | The `Millwright` construct that deploys the control plane. | The operator's CDK app. |
 | [`@copperbox/millwright-cli`](packages/millwright-cli) | `millwright` binary (npx-able). | Operator + developer machines. |
 | [`@copperbox/millwright-state`](packages/millwright-state) | Shared control- and data-plane contracts: state/polling table keys, SSM config-plane paths, S3 layout, the buildspec renderer, the `secretsAllowedRefs` gate. | A dependency of the CDK and CLI packages, not installed directly. |
@@ -72,9 +72,15 @@ typecheck, test, and build on every pull request and push to `main`.
 ```sh
 npx @copperbox/millwright-cli init   # scaffold the CDK app
 npm install && npx cdk deploy        # deploy the control plane
-millwright setup                     # create the GitHub App, pin host keys
-millwright repo add acme/api         # onboard a repo end to end
+npx millwright setup                 # create the GitHub App, pin host keys
+npx millwright repo add acme/api     # onboard a repo end to end
 ```
+
+The scaffold pins `@copperbox/millwright-cli` as a devDependency, so
+`npx millwright` resolves to this project's CLI inside the app directory. To
+run `millwright` from anywhere, `npm install -g @copperbox/millwright-cli`.
+Bare `npx millwright` in a directory that does not install the scoped package
+resolves to an unrelated `millwright` package on npm.
 
 `setup` creates the per-deployment GitHub App via the manifest flow (or takes
 a fine-grained PAT with `--pat`); `repo add` writes the repo's config, mints
@@ -106,9 +112,11 @@ ci.job('build', {
 export default app;
 ```
 
-`npx millwright synth` compiles the definition to the JSON run model — the
-contract between definition, cloud orchestration, and the local runner —
-printing synth-time errors and lints to stderr.
+`npx @copperbox/millwright-cli synth` compiles the definition to the JSON run
+model — the contract between definition, cloud orchestration, and the local
+runner — printing synth-time errors and lints to stderr. Add
+`@copperbox/millwright-cli` as a devDependency to shorten that to
+`npx millwright synth`.
 
 **→ [Authoring workflows](docs/workflow-authoring.md)** — every trigger and job
 option, dependencies, artifacts, caching, and how secrets are gated.
