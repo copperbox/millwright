@@ -1,13 +1,22 @@
+import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { GetRepositoryPolicyCommand } from '@aws-sdk/client-ecr';
 import { GetAccountSummaryCommand, ListRolesCommand } from '@aws-sdk/client-iam';
 import { ListServiceQuotasCommand } from '@aws-sdk/client-service-quotas';
+import { DescribeExecutionCommand } from '@aws-sdk/client-sfn';
 import {
+  executionArn,
+  executionName,
   refMapKey,
   registryKey,
   serializeGithubCredentials,
   serializeRepoConfig,
   defaultRepoConfig,
+  shellQuote,
+  synthExecutionName,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
 import { DoctorDeps, doctor } from '../src/doctor';
@@ -20,6 +29,47 @@ const POLLING_TABLE = 'millwright-prod-polling';
 const REPO = 'acme/api';
 const SHA = 'c0ffee0000000000000000000000000000000000';
 const NOW = () => new Date('2026-08-12T09:00:00Z');
+const RUN_EXECUTOR = 'arn:aws:states:eu-west-1:123456789012:stateMachine:millwright-prod-run-executor';
+const BOOTSTRAP_ARN = executionArn(RUN_EXECUTOR, synthExecutionName(REPO, 'refs/heads/main', SHA))!;
+/** The fresh synth-only execution doctor tells the operator to start for the same commit. */
+function resynthCommand(ref: string): string {
+  return (
+    `aws stepfunctions start-execution --state-machine-arn ${RUN_EXECUTOR} --name ` +
+    executionName('synth', `${REPO}-c0ffee000000-retry`, `${REPO}#${ref}#${SHA}#${NOW().toISOString()}`) +
+    ` --input ${shellQuote(JSON.stringify({ action: 'synth-only', repo: REPO, ref, sha: SHA }))}`
+  );
+}
+const RESYNTH_COMMAND = resynthCommand('refs/heads/main');
+
+/**
+ * Runs `command` through a real POSIX shell with a stub `aws` first on PATH
+ * that records its argv, and returns that argv: what the operator's shell
+ * hands to the AWS CLI when the printed command is pasted.
+ */
+function argvSeenByAws(command: string): string[] {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'millwright-doctor-'));
+  try {
+    const argvFile = path.join(dir, 'argv');
+    fs.writeFileSync(
+      path.join(dir, 'aws'),
+      `#!/bin/sh\nfor arg in "$@"; do printf '%s\\0' "$arg"; done > ${shellQuote(argvFile)}\n`,
+      { mode: 0o755 },
+    );
+    execFileSync('sh', ['-c', command], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}` },
+      stdio: 'ignore',
+    });
+    return fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** What DescribeExecution reports for the default-branch bootstrap synth. */
+type BootstrapFixture =
+  | 'missing'
+  | 'denied'
+  | { status: string; stopDate?: Date };
 
 const APP_KEY = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs1', format: 'pem' })
@@ -64,6 +114,10 @@ function githubFetch(fixture: GithubFixture): FetchLike {
 }
 
 interface FixtureOptions {
+  /** @default 'missing' (no bootstrap execution exists yet) */
+  bootstrap?: BootstrapFixture;
+  /** @default true — the manifest names the run executor state machine */
+  withRunExecutor?: boolean;
   github?: GithubFixture;
   withCredentials?: boolean;
   withDeployKey?: boolean;
@@ -72,6 +126,8 @@ interface FixtureOptions {
   lastTickAt?: string | null;
   breakerOpen?: boolean;
   headError?: string;
+  /** @default 'refs/heads/main' — what HEAD's symref resolves to */
+  ref?: string;
   secretsRefs?: string[];
   ecrRepos?: string[];
 }
@@ -84,6 +140,7 @@ function fixture(options: FixtureOptions = {}) {
     artifactBucket: 'millwright-prod-artifacts',
     buildLogGroup: '/millwright/prod/builds',
     eventBus: 'millwright-prod-bus',
+    ...(options.withRunExecutor === false ? {} : { runExecutor: RUN_EXECUTOR }),
   });
   if (options.withCredentials !== false) {
     ssm.set(
@@ -131,6 +188,7 @@ function fixture(options: FixtureOptions = {}) {
   }
 
   const lines: string[] = [];
+  const sfnCalls: string[] = [];
   const deps: DoctorDeps = {
     ssm,
     ddb,
@@ -166,17 +224,36 @@ function fixture(options: FixtureOptions = {}) {
         throw new Error('unexpected ECR command');
       },
     },
+    sfn: {
+      send: async (command: unknown) => {
+        if (!(command instanceof DescribeExecutionCommand)) {
+          throw new Error('unexpected SFN command');
+        }
+        sfnCalls.push(command.input.executionArn as string);
+        const bootstrap = options.bootstrap ?? 'missing';
+        if (bootstrap === 'missing') {
+          throw Object.assign(new Error('Execution Does Not Exist'), { name: 'ExecutionDoesNotExist' });
+        }
+        if (bootstrap === 'denied') {
+          throw Object.assign(new Error('not authorized to perform: states:DescribeExecution'), {
+            name: 'AccessDeniedException',
+          });
+        }
+        return { executionArn: command.input.executionArn, ...bootstrap };
+      },
+    },
     fetchLike: githubFetch(options.github ?? {}),
     output: (line) => lines.push(line),
     resolveHead: async () => {
       if (options.headError) {
         throw new Error(options.headError);
       }
-      return { branch: 'main', ref: 'refs/heads/main', sha: SHA, empty: false };
+      const ref = options.ref ?? 'refs/heads/main';
+      return { branch: ref.replace(/^refs\/heads\//, ''), ref, sha: SHA, empty: false };
     },
     now: NOW,
   };
-  return { deps, lines };
+  return { deps, lines, sfnCalls };
 }
 
 const CIRCUIT = { pk: 'CIRCUIT', sk: '-' };
@@ -198,14 +275,129 @@ describe('doctor', () => {
     expect(lines.at(-1)).toBe('doctor: all checks passed (10 checks)');
   });
 
-  it('FAILS (not warns) on a polled repo with no default-branch registry entry, naming the remedy', async () => {
-    const { deps, lines } = fixture({ withRegistryEntry: false });
+  it('FAILS (not warns) on a polled repo whose bootstrap never started, naming the remedy', async () => {
+    const { deps, lines, sfnCalls } = fixture({ withRegistryEntry: false });
     const report = await doctor(deps, {});
     expect(report.failed).toBe(1);
     const text = lines.join('\n');
     expect(text).toContain(`[FAIL] registry ${REPO}`);
     expect(text).toMatch(/polled but has no default-branch registry entry/);
-    expect(text).toContain(`Re-run "millwright repo add ${REPO}"`);
+    // Doctor looks the bootstrap synth up under the launcher's deterministic name.
+    expect(sfnCalls).toEqual([BOOTSTRAP_ARN]);
+    expect(text).toContain('No bootstrap synth has started for c0ffee000000');
+    // The repo is already configured (doctor found it via its config parameter), so a
+    // bare "repo add" is rejected — the remedy must lead with a push and fall back to
+    // an explicit remove-and-re-add that re-supplies the config flags.
+    expect(text).toContain('Push to main to prime the registry');
+    expect(text).toContain(
+      `run "millwright repo remove ${REPO}" then "millwright repo add ${REPO}" with its config flags supplied again`,
+    );
+    expect(text).toContain('also rotates the deploy key');
+    expect(text).not.toContain(`Re-run "millwright repo add ${REPO}"`);
+  });
+
+  it('points a failed bootstrap at a fresh synth-only execution, not re-add or redrive', async () => {
+    const stopDate = new Date('2026-08-10T09:00:00Z');
+    const { deps, lines } = fixture({
+      withRegistryEntry: false,
+      bootstrap: { status: 'FAILED', stopDate },
+    });
+    const report = await doctor(deps, {});
+    expect(report.failed).toBe(1);
+    const text = lines.join('\n');
+    expect(text).toContain(`[FAIL] registry ${REPO}`);
+    expect(text).toContain('The bootstrap synth for c0ffee000000 FAILED at 2026-08-10T09:00:00.000Z');
+    // Re-adding re-emits the same (repo, ref, sha); SFN refuses the closed execution's name.
+    expect(text).toContain('Removing and re-adding the repo will NOT re-synth this commit');
+    expect(text).toContain("refuses to reuse a closed execution's name for 90 days");
+    expect(text).toContain('Push to main to prime the registry (a new sha is a new execution)');
+    // Redrive re-enters the terminal SynthFailed state, so it never starts a synth job.
+    expect(text).toContain('Redriving it will NOT re-synth either');
+    expect(text).not.toContain('redrive-execution');
+    // The same-commit recovery: the launcher's exact synth-only input under a name
+    // the launcher never derives, so the reserved bootstrap name is not in the way.
+    expect(text).toContain(`synth this commit again under a new execution name: ${RESYNTH_COMMAND}`);
+    expect(RESYNTH_COMMAND).not.toContain(synthExecutionName(REPO, 'refs/heads/main', SHA));
+    expect(text).not.toContain(`millwright repo remove ${REPO}`);
+  });
+
+  it('shell-quotes the recovery command so a hostile default-branch name cannot run commands', async () => {
+    // Git accepts this as a branch name. Inside bare single quotes the apostrophe
+    // would end the quoted JSON and the shell would run the substitution with the
+    // operator's credentials before aws ever started.
+    const probe = path.join(os.tmpdir(), `millwright-injection-probe-${process.pid}`);
+    const ref = `refs/heads/fix'$(touch ${probe})'x`;
+    const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status: 'FAILED' }, ref });
+    await doctor(deps, {});
+    const command = resynthCommand(ref);
+    expect(lines.join('\n')).toContain(`synth this commit again under a new execution name: ${command}`);
+    expect(command).toContain(`'\\''`);
+
+    // What a real shell hands to aws: the JSON as one argument with the ref
+    // byte-for-byte intact, and the substitution never run.
+    const argv = argvSeenByAws(command);
+    expect(argv.slice(0, 2)).toEqual(['stepfunctions', 'start-execution']);
+    const inputAt = argv.indexOf('--input');
+    expect(inputAt).toBeGreaterThan(0);
+    expect(argv.length).toBe(inputAt + 2);
+    expect(JSON.parse(argv[inputAt + 1])).toEqual({ action: 'synth-only', repo: REPO, ref, sha: SHA });
+    expect(fs.existsSync(probe)).toBe(false);
+  });
+
+  it('gives the same recovery for a timed-out or aborted bootstrap with no stop date', async () => {
+    for (const status of ['TIMED_OUT', 'ABORTED']) {
+      const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status } });
+      await doctor(deps, {});
+      const text = lines.join('\n');
+      expect(text).toContain(`The bootstrap synth for c0ffee000000 ${status}. Removing`);
+      expect(text).toContain(RESYNTH_COMMAND);
+      expect(text).toContain('Push to main to prime the registry');
+    }
+  });
+
+  it('warns rather than fails while the bootstrap synth is still running', async () => {
+    const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status: 'RUNNING' } });
+    const report = await doctor(deps, {});
+    expect(report.failed).toBe(0);
+    const text = lines.join('\n');
+    expect(text).toContain(`[warn] registry ${REPO}`);
+    expect(text).toContain('The bootstrap synth for c0ffee000000 is RUNNING; wait for it to finish');
+    expect(text).toContain('Do not remove and re-add the repo for this');
+  });
+
+  it('flags a succeeded bootstrap that left no registry entry', async () => {
+    const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status: 'SUCCEEDED' } });
+    const report = await doctor(deps, {});
+    expect(report.failed).toBe(1);
+    expect(lines.join('\n')).toContain(
+      'The bootstrap synth for c0ffee000000 SUCCEEDED yet wrote no registry entry',
+    );
+  });
+
+  it('still fails with the conditional remedy when the bootstrap state is unreadable', async () => {
+    for (const options of [{ bootstrap: 'denied' as const }, { withRunExecutor: false }]) {
+      const { deps, lines } = fixture({ withRegistryEntry: false, ...options });
+      const report = await doctor(deps, {});
+      expect(report.failed).toBe(1);
+      const text = lines.join('\n');
+      expect(text).toContain(`[FAIL] registry ${REPO}`);
+      expect(text).toContain('Could not tell whether a bootstrap synth already ran for c0ffee000000');
+      expect(text).toContain('Push to main to prime the registry');
+      expect(text).toContain('Only if that bootstrap never started will remove-and-re-add work');
+      expect(text).toContain('a failed bootstrap of the same commit needs a fresh synth-only execution');
+      expect(text).not.toContain('redrive-execution');
+    }
+    // With the state machine known, the start-execution command is printed outright.
+    const denied = fixture({ withRegistryEntry: false, bootstrap: 'denied' });
+    await doctor(denied.deps, {});
+    expect(denied.lines.join('\n')).toContain('DescribeExecution failed: not authorized');
+    expect(denied.lines.join('\n')).toContain(RESYNTH_COMMAND);
+    // Without it there is no ARN to print, so the runbook is the pointer.
+    const legacy = fixture({ withRegistryEntry: false, withRunExecutor: false });
+    await doctor(legacy.deps, {});
+    expect(legacy.lines.join('\n')).toContain('manifest names no run executor');
+    expect(legacy.lines.join('\n')).toContain('see the operations runbook');
+    expect(legacy.lines.join('\n')).not.toContain('start-execution');
   });
 
   it('warns instead when the repo has never been polled', async () => {

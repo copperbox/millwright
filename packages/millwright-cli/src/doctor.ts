@@ -13,17 +13,22 @@ import {
   RepoConfig,
   configPlaneRoot,
   deployKeyParameterName,
+  executionArn,
+  executionName,
   githubAppParameterName,
   hostKeysParameterName,
   parseGithubCredentials,
   parseRepoConfig,
   refMapKey,
   repoFromConfigParameterName,
+  shellQuote,
+  synthExecutionName,
   CIRCUIT_BREAKER_KEY,
 } from '@copperbox/millwright-state';
 import { GetRepositoryPolicyCommand } from '@aws-sdk/client-ecr';
 import { GetAccountSummaryCommand, ListRolesCommand } from '@aws-sdk/client-iam';
 import { ListServiceQuotasCommand } from '@aws-sdk/client-service-quotas';
+import { DescribeExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   getOptionalParameter,
   listParametersByPrefix,
@@ -45,7 +50,7 @@ import {
 import { ResolveHeadOptions } from './repo';
 import { DynamoDocClientLike, getPollingItem, getRegistryEntry } from './state-reads';
 
-/** The slice of the IAM / Service Quotas / ECR clients doctor uses. */
+/** The slice of the IAM / Service Quotas / ECR / Step Functions clients doctor uses. */
 export interface AwsClientLike {
   send(command: unknown): Promise<any>;
 }
@@ -57,6 +62,7 @@ export interface DoctorDeps {
   readonly iam: AwsClientLike;
   readonly quotas: AwsClientLike;
   readonly ecr: AwsClientLike;
+  readonly sfn: AwsClientLike;
   readonly fetchLike: FetchLike;
   readonly output: (line: string) => void;
   /** Injectable for tests. @default a real SSH ls-refs exchange */
@@ -311,9 +317,104 @@ async function checkPoller(
   checks.add('poller', 'ok', `ticking — last tick ${ageSeconds}s ago${duration}`);
 }
 
+/** How long Step Functions reserves a closed execution's name. */
+const EXECUTION_NAME_RESERVED_DAYS = 90;
+
+type BootstrapState =
+  | { kind: 'unknown'; reason: string }
+  | { kind: 'never-started' }
+  | { kind: 'running'; status: string }
+  | { kind: 'succeeded' }
+  | { kind: 'closed'; status: string; stopDate: Date | undefined };
+
+/**
+ * The operator command that synths `sha` again at the same commit: a fresh
+ * synth-only execution of the run executor with the launcher's exact input,
+ * under a name the launcher never derives (so the reserved bootstrap name is
+ * not in the way). Redrive cannot do this: Synth and PostSynth catch every
+ * error into the terminal `SynthFailed` Fail state, and a redrive re-enters
+ * the state that failed, so the redriven execution fails again without
+ * starting a synth job.
+ *
+ * The operator pastes this into a shell, and `ref` is whatever HEAD's symref
+ * named, so the JSON is shell-quoted rather than wrapped in bare single
+ * quotes: a branch name holding an apostrophe would otherwise end the quoted
+ * word and the shell would run the rest of the name as a command.
+ */
+function resynthCommand(
+  stateMachineArn: string,
+  repo: string,
+  ref: string,
+  sha: string,
+  now: Date,
+): string {
+  const name = executionName(
+    'synth',
+    `${repo}-${sha.slice(0, 12)}-retry`,
+    `${repo}#${ref}#${sha}#${now.toISOString()}`,
+  );
+  const input = JSON.stringify({ action: 'synth-only', repo, ref, sha });
+  return (
+    `aws stepfunctions start-execution --state-machine-arn ${stateMachineArn} ` +
+    `--name ${name} --input ${shellQuote(input)}`
+  );
+}
+
+/**
+ * Where the default-branch bootstrap synth for `sha` stands. The launcher
+ * starts it under the deterministic name `synthExecutionName` derives, so
+ * doctor can describe it by name instead of listing executions.
+ */
+async function describeBootstrap(
+  deps: DoctorDeps,
+  deployment: Deployment,
+  repo: string,
+  ref: string,
+  sha: string,
+): Promise<BootstrapState> {
+  const stateMachineArn = manifestResource(deployment, 'runExecutor');
+  const arn =
+    stateMachineArn === undefined
+      ? undefined
+      : executionArn(stateMachineArn, synthExecutionName(repo, ref, sha));
+  if (arn === undefined) {
+    return { kind: 'unknown', reason: 'manifest names no run executor (deployment predates it)' };
+  }
+  let execution: { status?: string; stopDate?: Date };
+  try {
+    execution = await deps.sfn.send(new DescribeExecutionCommand({ executionArn: arn }));
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'ExecutionDoesNotExist') {
+      return { kind: 'never-started' };
+    }
+    return { kind: 'unknown', reason: `DescribeExecution failed: ${(err as Error).message}` };
+  }
+  const status = execution.status ?? 'UNKNOWN';
+  if (status === 'RUNNING' || status === 'PENDING_REDRIVE') {
+    return { kind: 'running', status };
+  }
+  if (status === 'SUCCEEDED') {
+    return { kind: 'succeeded' };
+  }
+  return { kind: 'closed', status, stopDate: execution.stopDate };
+}
+
 /**
  * The §8.3 gate: a configured repo with polling activity but no
- * default-branch registry entry is a hard FAIL naming the bootstrap remedy.
+ * default-branch registry entry is a hard FAIL naming the remedy. Every repo
+ * doctor inspects was found via its config parameter, so a bare "repo add" is
+ * rejected as already configured.
+ *
+ * The remedy depends on the bootstrap synth's state. Pushing to the default
+ * branch always works: a new sha is a new execution. Remove-and-re-add only
+ * works while the bootstrap for the current head has never started: `repo
+ * add` emits a bootstrap event for the same (repo, ref, sha), the launcher
+ * derives the same execution name, and Step Functions reserves a closed
+ * execution's name for 90 days, so the restart is swallowed as
+ * ExecutionAlreadyExists and the registry stays empty. For a failed bootstrap
+ * the way back at the same commit is a fresh synth-only execution under a new
+ * name, which doctor prints ready to run (`resynthCommand`); redrive would
+ * only re-enter the SynthFailed state.
  */
 async function checkRegistry(
   checks: Checks,
@@ -350,14 +451,84 @@ async function checkRegistry(
   }
   const polled = (await getPollingItem(deps.ddb, pollingTable, refMapKey(repo.repo))) !== undefined;
   if (polled) {
-    checks.add(
-      name,
-      'fail',
+    const now = deps.now ?? (() => new Date());
+    const branch = head?.branch ?? defaultRef;
+    const problem =
       `${repo.repo} is being polled but has no default-branch registry entry — its pushes ` +
-        `cannot match any workflow. Re-run "millwright repo add ${repo.repo}" to emit the ` +
-        `bootstrap event (or push to ${head?.branch ?? defaultRef}) so the registry gets primed`,
-    );
-    return;
+      `cannot match any workflow. `;
+    const push = `Push to ${branch} to prime the registry`;
+    const readd =
+      `run "millwright repo remove ${repo.repo}" then "millwright repo add ${repo.repo}" ` +
+      `with its config flags supplied again (this also rotates the deploy key)`;
+    const sha = head?.sha;
+    const bootstrap =
+      sha === undefined
+        ? { kind: 'unknown' as const, reason: 'default-branch head sha unknown' }
+        : await describeBootstrap(deps, deployment, repo.repo, defaultRef, sha);
+    const short = sha?.slice(0, 12) ?? '?';
+    const stateMachineArn = manifestResource(deployment, 'runExecutor');
+    const resynth =
+      stateMachineArn === undefined || sha === undefined
+        ? undefined
+        : resynthCommand(stateMachineArn, repo.repo, defaultRef, sha, now());
+    switch (bootstrap.kind) {
+      case 'never-started':
+        checks.add(
+          name,
+          'fail',
+          `${problem}No bootstrap synth has started for ${short}. ${push}; if you cannot push, ${readd}`,
+        );
+        return;
+      case 'running':
+        checks.add(
+          name,
+          'warn',
+          `${problem}The bootstrap synth for ${short} is ${bootstrap.status}; wait for it to finish ` +
+            `and run doctor again. Do not remove and re-add the repo for this`,
+        );
+        return;
+      case 'succeeded':
+        checks.add(
+          name,
+          'fail',
+          `${problem}The bootstrap synth for ${short} SUCCEEDED yet wrote no registry entry — ` +
+            `inspect the run executor's execution for ${short}. ${push}`,
+        );
+        return;
+      case 'closed': {
+        const stopped =
+          bootstrap.stopDate === undefined ? '' : ` at ${bootstrap.stopDate.toISOString()}`;
+        checks.add(
+          name,
+          'fail',
+          `${problem}The bootstrap synth for ${short} ${bootstrap.status}${stopped}. ` +
+            `Removing and re-adding the repo will NOT re-synth this commit: "repo add" emits the same ` +
+            `(repo, ref, sha) bootstrap and Step Functions refuses to reuse a closed execution's ` +
+            `name for ${EXECUTION_NAME_RESERVED_DAYS} days. Redriving it will NOT re-synth either: ` +
+            `it ended in the SynthFailed state and a redrive re-enters that state. Fix the cause ` +
+            `(the synth logs are in the builds log group), then ${push} (a new sha is a new ` +
+            `execution), or synth this commit again under a new execution name: ` +
+            `${resynth ?? 'see the operations runbook'}`,
+        );
+        return;
+      }
+      case 'unknown': {
+        const retry =
+          resynth === undefined
+            ? 'a failed bootstrap of the same commit needs a fresh synth-only execution of the run ' +
+              'executor under a new name (see the operations runbook); redriving it does not re-synth'
+            : 'a failed bootstrap of the same commit needs a fresh synth-only execution under a new ' +
+              `name (redriving it does not re-synth): ${resynth}`;
+        checks.add(
+          name,
+          'fail',
+          `${problem}Could not tell whether a bootstrap synth already ran for ${short} ` +
+            `(${bootstrap.reason}). ${push}. Only if that bootstrap never started will ` +
+            `remove-and-re-add work: ${readd}; ${retry}`,
+        );
+        return;
+      }
+    }
   }
   checks.add(
     name,
