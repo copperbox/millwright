@@ -21,6 +21,7 @@ import {
   parseRepoConfig,
   refMapKey,
   repoFromConfigParameterName,
+  shellQuote,
   synthExecutionName,
   CIRCUIT_BREAKER_KEY,
 } from '@copperbox/millwright-state';
@@ -334,6 +335,11 @@ type BootstrapState =
  * error into the terminal `SynthFailed` Fail state, and a redrive re-enters
  * the state that failed, so the redriven execution fails again without
  * starting a synth job.
+ *
+ * The operator pastes this into a shell, and `ref` is whatever HEAD's symref
+ * named, so the JSON is shell-quoted rather than wrapped in bare single
+ * quotes: a branch name holding an apostrophe would otherwise end the quoted
+ * word and the shell would run the rest of the name as a command.
  */
 function resynthCommand(
   stateMachineArn: string,
@@ -350,7 +356,7 @@ function resynthCommand(
   const input = JSON.stringify({ action: 'synth-only', repo, ref, sha });
   return (
     `aws stepfunctions start-execution --state-machine-arn ${stateMachineArn} ` +
-    `--name ${name} --input '${input}'`
+    `--name ${name} --input ${shellQuote(input)}`
   );
 }
 

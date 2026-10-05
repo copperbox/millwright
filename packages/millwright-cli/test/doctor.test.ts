@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { GetRepositoryPolicyCommand } from '@aws-sdk/client-ecr';
 import { GetAccountSummaryCommand, ListRolesCommand } from '@aws-sdk/client-iam';
 import { ListServiceQuotasCommand } from '@aws-sdk/client-service-quotas';
@@ -11,6 +15,7 @@ import {
   serializeGithubCredentials,
   serializeRepoConfig,
   defaultRepoConfig,
+  shellQuote,
   synthExecutionName,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
@@ -27,10 +32,38 @@ const NOW = () => new Date('2026-08-12T09:00:00Z');
 const RUN_EXECUTOR = 'arn:aws:states:eu-west-1:123456789012:stateMachine:millwright-prod-run-executor';
 const BOOTSTRAP_ARN = executionArn(RUN_EXECUTOR, synthExecutionName(REPO, 'refs/heads/main', SHA))!;
 /** The fresh synth-only execution doctor tells the operator to start for the same commit. */
-const RESYNTH_COMMAND =
-  `aws stepfunctions start-execution --state-machine-arn ${RUN_EXECUTOR} --name ` +
-  executionName('synth', `${REPO}-c0ffee000000-retry`, `${REPO}#refs/heads/main#${SHA}#${NOW().toISOString()}`) +
-  ` --input '${JSON.stringify({ action: 'synth-only', repo: REPO, ref: 'refs/heads/main', sha: SHA })}'`;
+function resynthCommand(ref: string): string {
+  return (
+    `aws stepfunctions start-execution --state-machine-arn ${RUN_EXECUTOR} --name ` +
+    executionName('synth', `${REPO}-c0ffee000000-retry`, `${REPO}#${ref}#${SHA}#${NOW().toISOString()}`) +
+    ` --input ${shellQuote(JSON.stringify({ action: 'synth-only', repo: REPO, ref, sha: SHA }))}`
+  );
+}
+const RESYNTH_COMMAND = resynthCommand('refs/heads/main');
+
+/**
+ * Runs `command` through a real POSIX shell with a stub `aws` first on PATH
+ * that records its argv, and returns that argv: what the operator's shell
+ * hands to the AWS CLI when the printed command is pasted.
+ */
+function argvSeenByAws(command: string): string[] {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'millwright-doctor-'));
+  try {
+    const argvFile = path.join(dir, 'argv');
+    fs.writeFileSync(
+      path.join(dir, 'aws'),
+      `#!/bin/sh\nfor arg in "$@"; do printf '%s\\0' "$arg"; done > ${shellQuote(argvFile)}\n`,
+      { mode: 0o755 },
+    );
+    execFileSync('sh', ['-c', command], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}` },
+      stdio: 'ignore',
+    });
+    return fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /** What DescribeExecution reports for the default-branch bootstrap synth. */
 type BootstrapFixture =
@@ -93,6 +126,8 @@ interface FixtureOptions {
   lastTickAt?: string | null;
   breakerOpen?: boolean;
   headError?: string;
+  /** @default 'refs/heads/main' — what HEAD's symref resolves to */
+  ref?: string;
   secretsRefs?: string[];
   ecrRepos?: string[];
 }
@@ -213,7 +248,8 @@ function fixture(options: FixtureOptions = {}) {
       if (options.headError) {
         throw new Error(options.headError);
       }
-      return { branch: 'main', ref: 'refs/heads/main', sha: SHA, empty: false };
+      const ref = options.ref ?? 'refs/heads/main';
+      return { branch: ref.replace(/^refs\/heads\//, ''), ref, sha: SHA, empty: false };
     },
     now: NOW,
   };
@@ -283,6 +319,29 @@ describe('doctor', () => {
     expect(text).toContain(`synth this commit again under a new execution name: ${RESYNTH_COMMAND}`);
     expect(RESYNTH_COMMAND).not.toContain(synthExecutionName(REPO, 'refs/heads/main', SHA));
     expect(text).not.toContain(`millwright repo remove ${REPO}`);
+  });
+
+  it('shell-quotes the recovery command so a hostile default-branch name cannot run commands', async () => {
+    // Git accepts this as a branch name. Inside bare single quotes the apostrophe
+    // would end the quoted JSON and the shell would run the substitution with the
+    // operator's credentials before aws ever started.
+    const probe = path.join(os.tmpdir(), `millwright-injection-probe-${process.pid}`);
+    const ref = `refs/heads/fix'$(touch ${probe})'x`;
+    const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status: 'FAILED' }, ref });
+    await doctor(deps, {});
+    const command = resynthCommand(ref);
+    expect(lines.join('\n')).toContain(`synth this commit again under a new execution name: ${command}`);
+    expect(command).toContain(`'\\''`);
+
+    // What a real shell hands to aws: the JSON as one argument with the ref
+    // byte-for-byte intact, and the substitution never run.
+    const argv = argvSeenByAws(command);
+    expect(argv.slice(0, 2)).toEqual(['stepfunctions', 'start-execution']);
+    const inputAt = argv.indexOf('--input');
+    expect(inputAt).toBeGreaterThan(0);
+    expect(argv.length).toBe(inputAt + 2);
+    expect(JSON.parse(argv[inputAt + 1])).toEqual({ action: 'synth-only', repo: REPO, ref, sha: SHA });
+    expect(fs.existsSync(probe)).toBe(false);
   });
 
   it('gives the same recovery for a timed-out or aborted bootstrap with no stop date', async () => {
