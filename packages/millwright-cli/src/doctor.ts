@@ -313,7 +313,10 @@ async function checkPoller(
 
 /**
  * The §8.3 gate: a configured repo with polling activity but no
- * default-branch registry entry is a hard FAIL naming the bootstrap remedy.
+ * default-branch registry entry is a hard FAIL naming the remedy. Every repo
+ * doctor inspects was found via its config parameter, so a bare "repo add" is
+ * rejected as already configured — the remedy leads with a push to the default
+ * branch and falls back to an explicit remove-and-re-add.
  */
 async function checkRegistry(
   checks: Checks,
@@ -354,8 +357,10 @@ async function checkRegistry(
       name,
       'fail',
       `${repo.repo} is being polled but has no default-branch registry entry — its pushes ` +
-        `cannot match any workflow. Re-run "millwright repo add ${repo.repo}" to emit the ` +
-        `bootstrap event (or push to ${head?.branch ?? defaultRef}) so the registry gets primed`,
+        `cannot match any workflow. Push to ${head?.branch ?? defaultRef} to prime the registry; ` +
+        `if you cannot push, run "millwright repo remove ${repo.repo}" then ` +
+        `"millwright repo add ${repo.repo}" with its config flags supplied again ` +
+        `(this also rotates the deploy key)`,
     );
     return;
   }

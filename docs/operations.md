@@ -286,8 +286,13 @@ Run `millwright doctor` first. Most of what follows is a specific `[FAIL]` or
    below.
 4. **Is the registry primed?** A repo showing polling activity but no
    default-branch registry entry is a hard `doctor` failure, and it names the
-   remedy. This is what `repo add` primes with a `bootstrap` event; if it never
-   completed, re-run `millwright repo add`, or push once to the default branch.
+   remedy. `repo add` primes the registry with a `bootstrap` event when the repo
+   is first onboarded; if that never completed, push once to the default branch
+   and the synth of that push writes the entry. If you cannot push, remove and
+   re-add the repo as in [Rotating a deploy key](#rotating-a-deploy-key) —
+   `repo remove` then `repo add` with the config flags supplied again. A bare
+   `repo add` on an already-configured repo is rejected, and `repo update` only
+   rewrites the config parameter without emitting a `bootstrap` event.
 5. **Did the event dedupe?** Dedupe is content-derived on
    `EVENT#<repo>#<ref>#<sha>#<kind>` with a 30-minute TTL. A force-push that
    *reverts* to a sha already seen in the last 30 minutes coalesces into the
