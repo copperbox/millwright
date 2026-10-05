@@ -205,7 +205,15 @@ describe('doctor', () => {
     const text = lines.join('\n');
     expect(text).toContain(`[FAIL] registry ${REPO}`);
     expect(text).toMatch(/polled but has no default-branch registry entry/);
-    expect(text).toContain(`Re-run "millwright repo add ${REPO}"`);
+    // The repo is already configured (doctor found it via its config parameter), so a
+    // bare "repo add" is rejected — the remedy must lead with a push and fall back to
+    // an explicit remove-and-re-add that re-supplies the config flags.
+    expect(text).toContain('Push to main to prime the registry');
+    expect(text).toContain(
+      `run "millwright repo remove ${REPO}" then "millwright repo add ${REPO}" with its config flags supplied again`,
+    );
+    expect(text).toContain('also rotates the deploy key');
+    expect(text).not.toContain(`Re-run "millwright repo add ${REPO}"`);
   });
 
   it('warns instead when the repo has never been polled', async () => {
