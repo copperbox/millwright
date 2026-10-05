@@ -14,6 +14,7 @@ import {
   configPlaneRoot,
   deployKeyParameterName,
   executionArn,
+  executionName,
   githubAppParameterName,
   hostKeysParameterName,
   parseGithubCredentials,
@@ -315,8 +316,6 @@ async function checkPoller(
   checks.add('poller', 'ok', `ticking — last tick ${ageSeconds}s ago${duration}`);
 }
 
-/** Redrive window for a closed Standard execution (Step Functions limit). */
-const REDRIVE_WINDOW_DAYS = 14;
 /** How long Step Functions reserves a closed execution's name. */
 const EXECUTION_NAME_RESERVED_DAYS = 90;
 
@@ -325,7 +324,35 @@ type BootstrapState =
   | { kind: 'never-started' }
   | { kind: 'running'; status: string }
   | { kind: 'succeeded' }
-  | { kind: 'closed'; status: string; stopDate: Date | undefined; arn: string };
+  | { kind: 'closed'; status: string; stopDate: Date | undefined };
+
+/**
+ * The operator command that synths `sha` again at the same commit: a fresh
+ * synth-only execution of the run executor with the launcher's exact input,
+ * under a name the launcher never derives (so the reserved bootstrap name is
+ * not in the way). Redrive cannot do this: Synth and PostSynth catch every
+ * error into the terminal `SynthFailed` Fail state, and a redrive re-enters
+ * the state that failed, so the redriven execution fails again without
+ * starting a synth job.
+ */
+function resynthCommand(
+  stateMachineArn: string,
+  repo: string,
+  ref: string,
+  sha: string,
+  now: Date,
+): string {
+  const name = executionName(
+    'synth',
+    `${repo}-${sha.slice(0, 12)}-retry`,
+    `${repo}#${ref}#${sha}#${now.toISOString()}`,
+  );
+  const input = JSON.stringify({ action: 'synth-only', repo, ref, sha });
+  return (
+    `aws stepfunctions start-execution --state-machine-arn ${stateMachineArn} ` +
+    `--name ${name} --input '${input}'`
+  );
+}
 
 /**
  * Where the default-branch bootstrap synth for `sha` stands. The launcher
@@ -363,11 +390,7 @@ async function describeBootstrap(
   if (status === 'SUCCEEDED') {
     return { kind: 'succeeded' };
   }
-  return { kind: 'closed', status, stopDate: execution.stopDate, arn };
-}
-
-function daysSince(date: Date | undefined, now: Date): number | undefined {
-  return date === undefined ? undefined : (now.getTime() - date.getTime()) / (24 * 60 * 60 * 1000);
+  return { kind: 'closed', status, stopDate: execution.stopDate };
 }
 
 /**
@@ -383,7 +406,9 @@ function daysSince(date: Date | undefined, now: Date): number | undefined {
  * derives the same execution name, and Step Functions reserves a closed
  * execution's name for 90 days, so the restart is swallowed as
  * ExecutionAlreadyExists and the registry stays empty. For a failed bootstrap
- * the way back at the same commit is to redrive the execution.
+ * the way back at the same commit is a fresh synth-only execution under a new
+ * name, which doctor prints ready to run (`resynthCommand`); redrive would
+ * only re-enter the SynthFailed state.
  */
 async function checkRegistry(
   checks: Checks,
@@ -435,6 +460,11 @@ async function checkRegistry(
         ? { kind: 'unknown' as const, reason: 'default-branch head sha unknown' }
         : await describeBootstrap(deps, deployment, repo.repo, defaultRef, sha);
     const short = sha?.slice(0, 12) ?? '?';
+    const stateMachineArn = manifestResource(deployment, 'runExecutor');
+    const resynth =
+      stateMachineArn === undefined || sha === undefined
+        ? undefined
+        : resynthCommand(stateMachineArn, repo.repo, defaultRef, sha, now());
     switch (bootstrap.kind) {
       case 'never-started':
         checks.add(
@@ -460,33 +490,38 @@ async function checkRegistry(
         );
         return;
       case 'closed': {
-        const age = daysSince(bootstrap.stopDate, now());
         const stopped =
           bootstrap.stopDate === undefined ? '' : ` at ${bootstrap.stopDate.toISOString()}`;
-        const redrive =
-          age !== undefined && age <= REDRIVE_WINDOW_DAYS
-            ? `redrive it: "aws stepfunctions redrive-execution --execution-arn ${bootstrap.arn}" ` +
-              `(redrive stays available for ${REDRIVE_WINDOW_DAYS} days after it stopped)`
-            : `it stopped more than ${REDRIVE_WINDOW_DAYS} days ago, so it can no longer be redriven`;
         checks.add(
           name,
           'fail',
           `${problem}The bootstrap synth for ${short} ${bootstrap.status}${stopped}. ` +
             `Removing and re-adding the repo will NOT re-synth this commit: "repo add" emits the same ` +
             `(repo, ref, sha) bootstrap and Step Functions refuses to reuse a closed execution's ` +
-            `name for ${EXECUTION_NAME_RESERVED_DAYS} days. ${push} (a new sha is a new execution), or ${redrive}`,
+            `name for ${EXECUTION_NAME_RESERVED_DAYS} days. Redriving it will NOT re-synth either: ` +
+            `it ended in the SynthFailed state and a redrive re-enters that state. Fix the cause ` +
+            `(the synth logs are in the builds log group), then ${push} (a new sha is a new ` +
+            `execution), or synth this commit again under a new execution name: ` +
+            `${resynth ?? 'see the operations runbook'}`,
         );
         return;
       }
-      case 'unknown':
+      case 'unknown': {
+        const retry =
+          resynth === undefined
+            ? 'a failed bootstrap of the same commit needs a fresh synth-only execution of the run ' +
+              'executor under a new name (see the operations runbook); redriving it does not re-synth'
+            : 'a failed bootstrap of the same commit needs a fresh synth-only execution under a new ' +
+              `name (redriving it does not re-synth): ${resynth}`;
         checks.add(
           name,
           'fail',
           `${problem}Could not tell whether a bootstrap synth already ran for ${short} ` +
             `(${bootstrap.reason}). ${push}. Only if that bootstrap never started will ` +
-            `remove-and-re-add work: ${readd}; a failed bootstrap of the same commit must be redriven instead`,
+            `remove-and-re-add work: ${readd}; ${retry}`,
         );
         return;
+      }
     }
   }
   checks.add(

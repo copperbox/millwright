@@ -52,7 +52,9 @@ from any non-system principal, but grants nothing itself), plus DynamoDB reads o
 `<deploymentName>-state` and CloudWatch Logs reads for `runs`/`logs`.
 `doctor` also wants `states:DescribeExecution` on
 `<deploymentName>-run-executor` to report the state of a repo's bootstrap synth,
-and `states:RedriveExecution` if you intend to redrive a failed one.
+and recovering a failed bootstrap at the same commit means starting a fresh
+synth-only execution of that machine yourself, which needs
+`states:StartExecution` on it.
 
 ## 2. Scaffold and deploy the control plane
 

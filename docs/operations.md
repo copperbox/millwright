@@ -303,16 +303,36 @@ Run `millwright doctor` first. Most of what follows is a specific `[FAIL]` or
      carries the same (repo, ref, sha), so the launcher derives the same
      execution name, and Step Functions refuses to reuse a closed execution's
      name for 90 days. The restart is swallowed as already-started and the
-     registry stays empty. Either push a new commit to the default branch (a
-     new sha is a new execution) or, within 14 days of the failure, redrive the
-     execution with the ARN `doctor` prints:
-     `aws stepfunctions redrive-execution --execution-arn <arn>`. Fix the
-     cause first — the synth logs are in `/millwright/<name>/builds`.
+     registry stays empty. Redriving the failed execution does not help
+     either: both the synth and post-synth steps catch every error into the
+     terminal `SynthFailed` state, and a redrive re-enters the state that
+     failed, so the redriven execution fails again without starting a synth
+     job. Fix the cause first — the synth logs are in
+     `/millwright/<name>/builds` — then either push a new commit to the
+     default branch (a new sha is a new execution) or synth the same commit
+     again with a fresh synth-only execution under a new name. `doctor` prints
+     that command ready to run; it is the launcher's exact bootstrap input
+     under a name the launcher never derives:
+
+     ```sh
+     aws stepfunctions start-execution \
+       --state-machine-arn arn:aws:states:<region>:<account>:stateMachine:<name>-run-executor \
+       --name synth-<owner>-<repo>-<sha12>-retry-<hash> \
+       --input '{"action":"synth-only","repo":"<owner>/<repo>","ref":"refs/heads/<branch>","sha":"<sha>"}'
+     ```
+
+     The execution validates the model, writes the registry entry and reports
+     the repo-level `millwright / synth` check, exactly as the original
+     bootstrap would have. Any unused name under 80 characters works; the one
+     `doctor` prints hashes the current time so repeated attempts never
+     collide.
    - **The bootstrap is still running.** Wait and run `doctor` again.
 
    `doctor` needs `states:DescribeExecution` on the run executor to tell these
    apart; without it (or on a deployment whose manifest predates the
-   `runExecutor` entry) it prints the conditional form of the remedy.
+   `runExecutor` entry) it prints the conditional form of the remedy. Starting
+   the fresh synth-only execution needs `states:StartExecution` on the same
+   state machine.
 5. **Did the event dedupe?** Dedupe is content-derived on
    `EVENT#<repo>#<ref>#<sha>#<kind>` with a 30-minute TTL. A force-push that
    *reverts* to a sha already seen in the last 30 minutes coalesces into the

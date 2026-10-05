@@ -5,6 +5,7 @@ import { ListServiceQuotasCommand } from '@aws-sdk/client-service-quotas';
 import { DescribeExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   executionArn,
+  executionName,
   refMapKey,
   registryKey,
   serializeGithubCredentials,
@@ -25,6 +26,11 @@ const SHA = 'c0ffee0000000000000000000000000000000000';
 const NOW = () => new Date('2026-08-12T09:00:00Z');
 const RUN_EXECUTOR = 'arn:aws:states:eu-west-1:123456789012:stateMachine:millwright-prod-run-executor';
 const BOOTSTRAP_ARN = executionArn(RUN_EXECUTOR, synthExecutionName(REPO, 'refs/heads/main', SHA))!;
+/** The fresh synth-only execution doctor tells the operator to start for the same commit. */
+const RESYNTH_COMMAND =
+  `aws stepfunctions start-execution --state-machine-arn ${RUN_EXECUTOR} --name ` +
+  executionName('synth', `${REPO}-c0ffee000000-retry`, `${REPO}#refs/heads/main#${SHA}#${NOW().toISOString()}`) +
+  ` --input '${JSON.stringify({ action: 'synth-only', repo: REPO, ref: 'refs/heads/main', sha: SHA })}'`;
 
 /** What DescribeExecution reports for the default-branch bootstrap synth. */
 type BootstrapFixture =
@@ -254,7 +260,7 @@ describe('doctor', () => {
     expect(text).not.toContain(`Re-run "millwright repo add ${REPO}"`);
   });
 
-  it('points a failed bootstrap at redrive instead of remove-and-re-add', async () => {
+  it('points a failed bootstrap at a fresh synth-only execution, not re-add or redrive', async () => {
     const stopDate = new Date('2026-08-10T09:00:00Z');
     const { deps, lines } = fixture({
       withRegistryEntry: false,
@@ -269,23 +275,25 @@ describe('doctor', () => {
     expect(text).toContain('Removing and re-adding the repo will NOT re-synth this commit');
     expect(text).toContain("refuses to reuse a closed execution's name for 90 days");
     expect(text).toContain('Push to main to prime the registry (a new sha is a new execution)');
-    expect(text).toContain(
-      `redrive it: "aws stepfunctions redrive-execution --execution-arn ${BOOTSTRAP_ARN}"`,
-    );
+    // Redrive re-enters the terminal SynthFailed state, so it never starts a synth job.
+    expect(text).toContain('Redriving it will NOT re-synth either');
+    expect(text).not.toContain('redrive-execution');
+    // The same-commit recovery: the launcher's exact synth-only input under a name
+    // the launcher never derives, so the reserved bootstrap name is not in the way.
+    expect(text).toContain(`synth this commit again under a new execution name: ${RESYNTH_COMMAND}`);
+    expect(RESYNTH_COMMAND).not.toContain(synthExecutionName(REPO, 'refs/heads/main', SHA));
     expect(text).not.toContain(`millwright repo remove ${REPO}`);
   });
 
-  it('says when a failed bootstrap is past the redrive window', async () => {
-    const { deps, lines } = fixture({
-      withRegistryEntry: false,
-      bootstrap: { status: 'TIMED_OUT', stopDate: new Date('2026-07-01T00:00:00Z') },
-    });
-    await doctor(deps, {});
-    const text = lines.join('\n');
-    expect(text).toContain('The bootstrap synth for c0ffee000000 TIMED_OUT');
-    expect(text).toContain('it stopped more than 14 days ago, so it can no longer be redriven');
-    expect(text).not.toContain('redrive-execution');
-    expect(text).toContain('Push to main to prime the registry');
+  it('gives the same recovery for a timed-out or aborted bootstrap with no stop date', async () => {
+    for (const status of ['TIMED_OUT', 'ABORTED']) {
+      const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status } });
+      await doctor(deps, {});
+      const text = lines.join('\n');
+      expect(text).toContain(`The bootstrap synth for c0ffee000000 ${status}. Removing`);
+      expect(text).toContain(RESYNTH_COMMAND);
+      expect(text).toContain('Push to main to prime the registry');
+    }
   });
 
   it('warns rather than fails while the bootstrap synth is still running', async () => {
@@ -317,14 +325,20 @@ describe('doctor', () => {
       expect(text).toContain('Could not tell whether a bootstrap synth already ran for c0ffee000000');
       expect(text).toContain('Push to main to prime the registry');
       expect(text).toContain('Only if that bootstrap never started will remove-and-re-add work');
-      expect(text).toContain('a failed bootstrap of the same commit must be redriven instead');
+      expect(text).toContain('a failed bootstrap of the same commit needs a fresh synth-only execution');
+      expect(text).not.toContain('redrive-execution');
     }
+    // With the state machine known, the start-execution command is printed outright.
     const denied = fixture({ withRegistryEntry: false, bootstrap: 'denied' });
     await doctor(denied.deps, {});
     expect(denied.lines.join('\n')).toContain('DescribeExecution failed: not authorized');
+    expect(denied.lines.join('\n')).toContain(RESYNTH_COMMAND);
+    // Without it there is no ARN to print, so the runbook is the pointer.
     const legacy = fixture({ withRegistryEntry: false, withRunExecutor: false });
     await doctor(legacy.deps, {});
     expect(legacy.lines.join('\n')).toContain('manifest names no run executor');
+    expect(legacy.lines.join('\n')).toContain('see the operations runbook');
+    expect(legacy.lines.join('\n')).not.toContain('start-execution');
   });
 
   it('warns instead when the repo has never been polled', async () => {

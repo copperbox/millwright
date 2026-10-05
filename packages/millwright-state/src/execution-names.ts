@@ -25,7 +25,9 @@ export function executionName(prefix: string, readable: string, uniq: string): s
  * The bootstrap (synth-only) execution for one (repo, ref, sha). A second
  * `bootstrap` event for the same commit, such as the one `repo add` emits
  * after a remove-and-re-add, resolves to this same name, so once the first
- * execution has closed no second synth of that commit can start.
+ * execution has closed no second synth of that commit can start under it.
+ * Doctor hands operators a differently named synth-only execution with the
+ * same input for that case.
  */
 export function synthExecutionName(repo: string, ref: string, sha: string): string {
   return executionName('synth', `${repo}-${sha.slice(0, 12)}`, `${repo}#${ref}#${sha}`);
