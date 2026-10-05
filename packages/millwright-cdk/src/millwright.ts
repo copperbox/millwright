@@ -277,6 +277,8 @@ export class Millwright extends Construct {
           configKeyAlias: stores.configKeyAlias,
           // The CLI's dispatch/bootstrap PutEvents target.
           eventBus: this.eventBus.busName,
+          // Doctor describes a repo's bootstrap synth execution on this machine.
+          runExecutor: this.runExecutor.stateMachineArn,
         },
       }),
     });

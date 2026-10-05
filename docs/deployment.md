@@ -50,6 +50,9 @@ what it does: `ssm:GetParameter*`/`PutParameter`/`DeleteParameter` under
 `<deploymentName>-bus` (the bus resource policy permits `millwright.cli` events
 from any non-system principal, but grants nothing itself), plus DynamoDB reads on
 `<deploymentName>-state` and CloudWatch Logs reads for `runs`/`logs`.
+`doctor` also wants `states:DescribeExecution` on
+`<deploymentName>-run-executor` to report the state of a repo's bootstrap synth,
+and `states:RedriveExecution` if you intend to redrive a failed one.
 
 ## 2. Scaffold and deploy the control plane
 

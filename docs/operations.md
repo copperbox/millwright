@@ -287,12 +287,32 @@ Run `millwright doctor` first. Most of what follows is a specific `[FAIL]` or
 4. **Is the registry primed?** A repo showing polling activity but no
    default-branch registry entry is a hard `doctor` failure, and it names the
    remedy. `repo add` primes the registry with a `bootstrap` event when the repo
-   is first onboarded; if that never completed, push once to the default branch
-   and the synth of that push writes the entry. If you cannot push, remove and
-   re-add the repo as in [Rotating a deploy key](#rotating-a-deploy-key) —
-   `repo remove` then `repo add` with the config flags supplied again. A bare
-   `repo add` on an already-configured repo is rejected, and `repo update` only
-   rewrites the config parameter without emitting a `bootstrap` event.
+   is first onboarded; the launcher turns that into a synth-only execution of
+   the run executor named deterministically from (repo, ref, sha). `doctor`
+   looks that execution up and tells you which case you are in:
+   - **The bootstrap never started** (no execution exists). Push once to the
+     default branch and the synth of that push writes the entry. If you cannot
+     push, remove and re-add the repo as in
+     [Rotating a deploy key](#rotating-a-deploy-key) — `repo remove` then
+     `repo add` with the config flags supplied again — and the fresh
+     `bootstrap` event starts the synth. A bare `repo add` on an
+     already-configured repo is rejected, and `repo update` only rewrites the
+     config parameter without emitting a `bootstrap` event.
+   - **The bootstrap ran and failed** (FAILED, TIMED_OUT or ABORTED). Removing
+     and re-adding the repo does *not* help here: the new `bootstrap` event
+     carries the same (repo, ref, sha), so the launcher derives the same
+     execution name, and Step Functions refuses to reuse a closed execution's
+     name for 90 days. The restart is swallowed as already-started and the
+     registry stays empty. Either push a new commit to the default branch (a
+     new sha is a new execution) or, within 14 days of the failure, redrive the
+     execution with the ARN `doctor` prints:
+     `aws stepfunctions redrive-execution --execution-arn <arn>`. Fix the
+     cause first — the synth logs are in `/millwright/<name>/builds`.
+   - **The bootstrap is still running.** Wait and run `doctor` again.
+
+   `doctor` needs `states:DescribeExecution` on the run executor to tell these
+   apart; without it (or on a deployment whose manifest predates the
+   `runExecutor` entry) it prints the conditional form of the remedy.
 5. **Did the event dedupe?** Dedupe is content-derived on
    `EVENT#<repo>#<ref>#<sha>#<kind>` with a 30-minute TTL. A force-push that
    *reverts* to a sha already seen in the last 30 minutes coalesces into the
@@ -506,7 +526,10 @@ millwright doctor
 ```
 
 `repo add` mints a fresh read-only Ed25519 key, installs it via the App, and
-emits a `bootstrap` event to re-prime the registry.
+emits a `bootstrap` event to re-prime the registry. That event is keyed by the
+default branch's current sha, so it only starts a synth if no bootstrap of that
+commit has run before; see step 4 of
+[Pushes are not triggering runs](#pushes-are-not-triggering-runs) for the failed-bootstrap case.
 
 ### Re-pinning GitHub host keys
 

@@ -1,7 +1,11 @@
-import { createHash } from 'node:crypto';
 import type { SFNClient } from '@aws-sdk/client-sfn';
 import { StartExecutionCommand } from '@aws-sdk/client-sfn';
-import { RunItem, formatRunId } from '@copperbox/millwright-state';
+import {
+  RunItem,
+  executionName,
+  formatRunId,
+  synthExecutionName,
+} from '@copperbox/millwright-state';
 
 /**
  * Step 7: `StartExecution` on the run executor, always under a deterministic,
@@ -49,15 +53,12 @@ export interface SynthOnlyExecutionInput {
   readonly sha: string;
 }
 
-const NAME_LIMIT = 80;
-
-/** `<prefix>-<readable>-<hash12(uniq)>`, confined to SFN's name charset. */
-export function executionName(prefix: string, readable: string, uniq: string): string {
-  const hash = createHash('sha256').update(uniq).digest('hex').slice(0, 12);
-  const safe = readable.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-  const budget = NAME_LIMIT - prefix.length - hash.length - 2;
-  return `${prefix}-${safe.slice(0, budget)}-${hash}`;
-}
+/**
+ * Naming lives in millwright-state so the CLI can derive the same names
+ * (doctor looks a repo's bootstrap synth up by name). Re-exported for the
+ * runtime's existing callers.
+ */
+export { executionName };
 
 export class SfnExecutionStarter implements ExecutionStarter {
   constructor(
@@ -88,10 +89,7 @@ export class SfnExecutionStarter implements ExecutionStarter {
 
   async startSynthOnly(repo: string, ref: string, sha: string): Promise<void> {
     const input: SynthOnlyExecutionInput = { action: 'synth-only', repo, ref, sha };
-    await this.start(
-      executionName('synth', `${repo}-${sha.slice(0, 12)}`, `${repo}#${ref}#${sha}`),
-      input,
-    );
+    await this.start(synthExecutionName(repo, ref, sha), input);
   }
 
   private async start(name: string, input: RunExecutionInput | SynthOnlyExecutionInput) {
