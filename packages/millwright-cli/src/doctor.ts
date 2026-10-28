@@ -480,9 +480,11 @@ async function checkRegistry(
         );
         return;
       case 'running':
+        // Still a failure: the repo cannot match a workflow until the synth lands, and doctor's
+        // contract is that a polled repo with no registry entry fails (readiness gates rely on it).
         checks.add(
           name,
-          'warn',
+          'fail',
           `${problem}The bootstrap synth for ${short} is ${bootstrap.status}; wait for it to finish ` +
             `and run doctor again. Do not remove and re-add the repo for this`,
         );

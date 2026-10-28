@@ -328,11 +328,13 @@ Run `millwright doctor` first. Most of what follows is a specific `[FAIL]` or
      collide.
    - **The bootstrap is still running.** Wait and run `doctor` again.
 
-   `doctor` needs `states:DescribeExecution` on the run executor to tell these
-   apart; without it (or on a deployment whose manifest predates the
-   `runExecutor` entry) it prints the conditional form of the remedy. Starting
-   the fresh synth-only execution needs `states:StartExecution` on the same
-   state machine.
+   `doctor` needs `states:DescribeExecution` on the run executor's executions
+   (`arn:aws:states:<region>:<account>:execution:<deploymentName>-run-executor:*`)
+   to tell these apart; without it (or on a deployment whose manifest predates
+   the `runExecutor` entry) it prints the conditional form of the remedy.
+   Starting the fresh synth-only execution needs `states:StartExecution` on the
+   state machine itself
+   (`arn:aws:states:<region>:<account>:stateMachine:<deploymentName>-run-executor`).
 5. **Did the event dedupe?** Dedupe is content-derived on
    `EVENT#<repo>#<ref>#<sha>#<kind>` with a 30-minute TTL. A force-push that
    *reverts* to a sha already seen in the last 30 minutes coalesces into the

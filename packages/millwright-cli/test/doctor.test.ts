@@ -355,12 +355,12 @@ describe('doctor', () => {
     }
   });
 
-  it('warns rather than fails while the bootstrap synth is still running', async () => {
+  it('still fails, with wait guidance, while the bootstrap synth is running', async () => {
     const { deps, lines } = fixture({ withRegistryEntry: false, bootstrap: { status: 'RUNNING' } });
     const report = await doctor(deps, {});
-    expect(report.failed).toBe(0);
+    expect(report.failed).toBe(1);
     const text = lines.join('\n');
-    expect(text).toContain(`[warn] registry ${REPO}`);
+    expect(text).toContain(`[FAIL] registry ${REPO}`);
     expect(text).toContain('The bootstrap synth for c0ffee000000 is RUNNING; wait for it to finish');
     expect(text).toContain('Do not remove and re-add the repo for this');
   });
