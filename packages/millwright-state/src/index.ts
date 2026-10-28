@@ -274,3 +274,4 @@ export {
   runPrefix,
   sourceObjectKey,
 } from './s3-layout';
+export { executionArn, executionName, synthExecutionName } from './execution-names';

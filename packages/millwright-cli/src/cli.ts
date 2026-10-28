@@ -76,6 +76,7 @@ function doctorDeps(): DoctorDeps {
     iam: new IAMClient({}),
     quotas: new ServiceQuotasClient({}),
     ecr: new ECRClient({}),
+    sfn: new SFNClient({}),
     fetchLike: fetch,
     output,
   };

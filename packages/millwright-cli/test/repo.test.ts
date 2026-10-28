@@ -304,6 +304,19 @@ describe('repo list', () => {
     expect(lines.some((l) => l.startsWith('acme/api'))).toBe(true);
   });
 
+  it('prints the full ECR repo ARNs so the output can be pasted back into repo add', async () => {
+    const arns = ['arn:aws:ecr:us-east-1:1:repository/x', 'arn:aws:ecr:us-east-1:1:repository/y'];
+    const ssm = prodSsm();
+    ssm.set(`/millwright/prod/repos/${REPO}/config`, serializeRepoConfig({ ...defaultRepoConfig(), ecrPullRepos: arns }));
+    ssm.set('/millwright/prod/repos/acme/web/config', serializeRepoConfig(defaultRepoConfig()));
+    const { deps, lines } = makeDeps(ssm);
+    await repoList(deps);
+    const api = lines.find((l) => l.startsWith('acme/api'));
+    const web = lines.find((l) => l.startsWith('acme/web'));
+    expect(api).toContain(`ecrRepos=${arns.join(',')}`);
+    expect(web).toContain('ecrRepos=-');
+  });
+
   it('says so when nothing is configured', async () => {
     const { deps, lines } = makeDeps(prodSsm());
     await expect(repoList(deps)).resolves.toEqual([]);

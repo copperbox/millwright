@@ -94,6 +94,7 @@ describe('manifest parameter', () => {
         configKeyArn: 'TOKEN',
         configKeyAlias: 'alias/millwright/millwright',
         eventBus: 'millwright-bus',
+        runExecutor: 'arn:TOKEN:states:TOKEN:TOKEN:stateMachine:millwright-run-executor',
       },
     });
   });

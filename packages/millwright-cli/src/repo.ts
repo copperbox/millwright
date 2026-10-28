@@ -386,7 +386,7 @@ export async function repoList(
     deps.output(
       `${entry.repo}  prPolling=${entry.config.prPolling} forkPrPolicy=${entry.config.forkPrPolicy} ` +
         `secretsRefs=${entry.config.secretsAllowedRefs.join(',') || '-'} ` +
-        `ecrRepos=${entry.config.ecrPullRepos.length || '-'}`,
+        `ecrRepos=${entry.config.ecrPullRepos.join(',') || '-'}`,
     );
   }
   return entries;
