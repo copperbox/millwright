@@ -43,6 +43,7 @@ import {
   runsShowLocal,
 } from './runs';
 import { secretsList, secretsRm, secretsSet } from './secrets';
+import { assertSecretsRefPatterns } from './secrets-refs-flag';
 import { SetupDeps, refreshHostKeys, setup } from './setup';
 import { DEFAULT_ENTRY, runSynthCommand } from './synth-command';
 import { VERSION } from './version';
@@ -236,6 +237,9 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
         secretsAllowedRefs?: string[];
         pretty?: boolean;
       }) => {
+        // Typed flags only: cloud synth calls runSynthCommand directly with
+        // the stored config, which may legitimately hold older refs/ patterns.
+        assertSecretsRefPatterns(options.secretsAllowedRefs);
         const code = runSynthCommand(options);
         if (code !== 0) {
           signal.code = code;
