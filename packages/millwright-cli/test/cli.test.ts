@@ -77,6 +77,15 @@ describe('buildProgram', () => {
     ).rejects.toThrow(/'--all-scopes' cannot be used with option '--scope/);
   });
 
+  it('runs list rejects a --limit that is not a positive integer', async () => {
+    for (const bad of ['0', '-3', 'abc', '2.5']) {
+      const fresh = buildProgram();
+      await expect(
+        fresh.parseAsync(['runs', 'list', '--limit', bad], { from: 'user' }),
+      ).rejects.toThrow(`--limit must be a positive integer, got "${bad}"`);
+    }
+  });
+
   it('setup takes the --pat fallback and App-creation options', () => {
     const setup = program.commands.find((command) => command.name() === 'setup')!;
     const flags = setup.options.map((option) => option.long);

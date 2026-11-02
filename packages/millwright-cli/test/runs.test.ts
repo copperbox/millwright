@@ -1,6 +1,6 @@
 import { PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
-import { GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, QueryCommand, QueryCommandInput, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   JobItem,
   JobStatus,
@@ -26,6 +26,11 @@ import {
   runsShow,
 } from '../src/runs';
 import { FakeDdb } from './fake-ddb';
+
+/** Queries against a workflow's `RUN#` partition, in the order the CLI sent them. */
+function runPartitionQueries(ddb: FakeDdb): QueryCommandInput[] {
+  return ddb.queries.filter((query) => query.ExpressionAttributeValues?.[':sk'] === 'RUN#');
+}
 import { FakeSsm } from './fake-ssm';
 
 const NOW = Date.parse('2026-08-12T06:00:00Z');
@@ -367,6 +372,68 @@ describe('runs list', () => {
     const { deps, lines } = fixture();
     await runsList(deps, {});
     expect(lines).toEqual(['No runs found.']);
+  });
+  it('--ref finds runs behind more than --limit newer non-matching runs, capped newest first', async () => {
+    const { ddb, deps } = fixture();
+    ddb.pageSize = 4;
+    // Runs 1-4 on feature-x are older than 25 runs on main (#5-#29).
+    for (let n = 1; n <= 4; n += 1) {
+      ddb.put(TABLE, runItem('acme/api', 'ci', n, { ref: 'refs/heads/feature-x' }));
+    }
+    for (let n = 5; n <= 29; n += 1) {
+      ddb.put(TABLE, runItem('acme/api', 'ci', n, { createdAt: `2026-08-12T10:${String(n).padStart(2, '0')}:00Z` }));
+    }
+    const shown = await runsList(deps, { ref: 'feature-x', limit: 3 });
+    expect(shown.map((run) => run.runNumber)).toEqual([4, 3, 2]);
+    expect(shown.every((run) => run.ref === 'refs/heads/feature-x')).toBe(true);
+  });
+
+  it('--status pages past non-matching runs via a FilterExpression and stops once --limit match', async () => {
+    const { ddb, deps } = fixture();
+    ddb.pageSize = 5;
+    for (let n = 1; n <= 3; n += 1) {
+      ddb.put(TABLE, runItem('acme/api', 'ci', n, { status: 'FAILED' }));
+    }
+    for (let n = 4; n <= 25; n += 1) {
+      ddb.put(TABLE, runItem('acme/api', 'ci', n, { createdAt: `2026-08-12T10:${String(n).padStart(2, '0')}:00Z` }));
+    }
+    const shown = await runsList(deps, { status: 'failed', limit: 2 });
+    expect(shown.map((run) => run.runNumber)).toEqual([3, 2]);
+
+    const runQueries = ddb.queries.filter((q) => q.FilterExpression !== undefined);
+    expect(runQueries.length).toBeGreaterThan(1);
+    for (const query of runQueries) {
+      expect(query.FilterExpression).toBe('#status = :status');
+      expect(query.ExpressionAttributeNames).toEqual({ '#status': 'status' });
+      expect(query.ExpressionAttributeValues).toMatchObject({ ':status': 'FAILED' });
+    }
+    // Run #1 also FAILED, but paging stopped once two matches were in hand.
+    const lastStart = runQueries[runQueries.length - 1].ExclusiveStartKey as { sk: string } | undefined;
+    expect(lastStart).toBeDefined();
+    expect(lastStart!.sk < runItem('acme/api', 'ci', 2).sk).toBe(true);
+  });
+
+  it('with no filter still reads only --limit rows per workflow', async () => {
+    const { ddb, deps } = fixture();
+    ddb.pageSize = 100;
+    for (let n = 1; n <= 30; n += 1) {
+      ddb.put(TABLE, runItem('acme/api', 'ci', n, { createdAt: `2026-08-12T10:${String(n).padStart(2, '0')}:00Z` }));
+    }
+    const shown = await runsList(deps, { limit: 5 });
+    expect(shown.map((run) => run.runNumber)).toEqual([30, 29, 28, 27, 26]);
+    const runQueries = runPartitionQueries(ddb);
+    expect(runQueries).toHaveLength(1);
+    expect(runQueries[0].Limit).toBe(5);
+    expect(runQueries[0].FilterExpression).toBeUndefined();
+  });
+
+  it('rejects an unknown --status before touching the table', async () => {
+    const { ddb, deps } = fixture();
+    ddb.put(TABLE, runItem('acme/api', 'ci', 1));
+    await expect(runsList(deps, { status: 'borked' })).rejects.toThrow(
+      /--status must be one of PENDING, QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED; got "borked"/,
+    );
+    expect(runPartitionQueries(ddb)).toHaveLength(0);
   });
 });
 

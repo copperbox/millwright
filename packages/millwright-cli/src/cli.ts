@@ -146,6 +146,13 @@ function forkPrs(value: string): 'on' | 'off' {
   return value;
 }
 
+function positiveInt(flag: string, value: string): number {
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new CommandError(`${flag} must be a positive integer, got "${value}"`);
+  }
+  return Number(value);
+}
+
 function bool(flag: string, value: string): boolean {
   if (value === 'true' || value === 'on') {
     return true;
@@ -428,7 +435,7 @@ function buildProgramWithSignal(): { program: Command; exitCode: () => number } 
     .option('--workflow <wf>', 'only this workflow (name or owner/repo/name)')
     .option('--ref <ref>', 'only runs of this ref (short or full form)')
     .option('--status <s>', 'only runs with this status (e.g. RUNNING, FAILED)')
-    .option('--limit <n>', 'rows to show', (value) => Number.parseInt(value, 10), 20)
+    .option('--limit <n>', 'rows to show', (value) => positiveInt('--limit', value), 20)
     .action(async (options: { workflow?: string; ref?: string; status?: string; limit: number }) => {
       await runsList(runsDeps(), { ...options, explicitName: program.opts().deployment });
     });
