@@ -6,7 +6,7 @@
  * feeds back into orchestration decisions.
  */
 
-import { GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, QueryCommand, QueryCommandInput } from '@aws-sdk/lib-dynamodb';
 import {
   CheckStateItem,
   ItemKey,
@@ -101,28 +101,22 @@ export async function queryNewestRuns(
     return items as unknown as RunItem[];
   }
 
+  const query: QueryCommandInput = {
+    TableName: table,
+    KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
+    ExpressionAttributeValues: { ':pk': pk, ':sk': RUN_SORT_KEY_PREFIX },
+  };
+  if (filter.status !== undefined) {
+    // `status` is a DynamoDB reserved word, hence the name placeholder.
+    query.FilterExpression = '#status = :status';
+    query.ExpressionAttributeNames = { '#status': 'status' };
+    query.ExpressionAttributeValues = { ...query.ExpressionAttributeValues, ':status': filter.status };
+  }
+
   const runs: RunItem[] = [];
   let exclusiveStartKey: Record<string, unknown> | undefined;
   do {
-    const page = await ddb.send(
-      new QueryCommand({
-        TableName: table,
-        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
-        ExpressionAttributeValues: {
-          ':pk': pk,
-          ':sk': RUN_SORT_KEY_PREFIX,
-          ...(filter.status === undefined ? {} : { ':status': filter.status }),
-        },
-        // `status` is a DynamoDB reserved word, hence the name placeholder.
-        ...(filter.status === undefined
-          ? {}
-          : {
-              FilterExpression: '#status = :status',
-              ExpressionAttributeNames: { '#status': 'status' },
-            }),
-        ExclusiveStartKey: exclusiveStartKey,
-      }),
-    );
+    const page = await ddb.send(new QueryCommand({ ...query, ExclusiveStartKey: exclusiveStartKey }));
     for (const item of (page.Items ?? []) as unknown as RunItem[]) {
       if (filter.matches && !filter.matches(item)) {
         continue;

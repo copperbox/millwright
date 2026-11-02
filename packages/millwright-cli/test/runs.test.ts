@@ -1,6 +1,6 @@
 import { PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
-import { GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, QueryCommand, QueryCommandInput, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   JobItem,
   JobStatus,
@@ -26,6 +26,11 @@ import {
   runsShow,
 } from '../src/runs';
 import { FakeDdb } from './fake-ddb';
+
+/** Queries against a workflow's `RUN#` partition, in the order the CLI sent them. */
+function runPartitionQueries(ddb: FakeDdb): QueryCommandInput[] {
+  return ddb.queries.filter((query) => query.ExpressionAttributeValues?.[':sk'] === 'RUN#');
+}
 import { FakeSsm } from './fake-ssm';
 
 const NOW = Date.parse('2026-08-12T06:00:00Z');
@@ -416,7 +421,7 @@ describe('runs list', () => {
     }
     const shown = await runsList(deps, { limit: 5 });
     expect(shown.map((run) => run.runNumber)).toEqual([30, 29, 28, 27, 26]);
-    const runQueries = ddb.queries.filter((q) => (q.ExpressionAttributeValues as any)?.[':sk'] === 'RUN#');
+    const runQueries = runPartitionQueries(ddb);
     expect(runQueries).toHaveLength(1);
     expect(runQueries[0].Limit).toBe(5);
     expect(runQueries[0].FilterExpression).toBeUndefined();
@@ -428,7 +433,7 @@ describe('runs list', () => {
     await expect(runsList(deps, { status: 'borked' })).rejects.toThrow(
       /--status must be one of PENDING, QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED; got "borked"/,
     );
-    expect(ddb.queries.filter((q) => (q.ExpressionAttributeValues as any)?.[':sk'] === 'RUN#')).toHaveLength(0);
+    expect(runPartitionQueries(ddb)).toHaveLength(0);
   });
 });
 
