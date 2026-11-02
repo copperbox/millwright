@@ -46,6 +46,7 @@ import {
   getRepoInstallationId,
   listDeployKeys,
 } from './github/rest';
+import { assertSecretsRefPatterns } from './secrets-refs-flag';
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -271,6 +272,8 @@ function describeConfig(config: RepoConfig): string[] {
 
 export async function repoAdd(deps: RepoDeps, options: RepoAddOptions): Promise<void> {
   assertRepoName(options.repo);
+  // Before the deploy key is minted: a rejected flag must leave no trace.
+  assertSecretsRefPatterns(options.secretsRefs);
   const deployment = await discoverDeployment(deps.ssm, options);
   const keyId = configKeyId(deployment);
   const configParameter = repoConfigParameterName(deployment.name, options.repo);
@@ -340,6 +343,7 @@ export interface RepoUpdateOptions extends DiscoverOptions, RepoFlagOptions {
 
 export async function repoUpdate(deps: RepoDeps, options: RepoUpdateOptions): Promise<void> {
   assertRepoName(options.repo);
+  assertSecretsRefPatterns(options.secretsRefs);
   const deployment = await discoverDeployment(deps.ssm, options);
   const configParameter = repoConfigParameterName(deployment.name, options.repo);
   const raw = await getOptionalParameter(deps.ssm, configParameter);

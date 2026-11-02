@@ -12,7 +12,18 @@ import {
   shortRefName,
 } from '../src/synth-job/config';
 import { installPlan } from '../src/synth-job/install';
+import { runSynthCommand } from '../src/synth-command';
 import { RecordedCommand, SynthJobDeps, runSynthJob } from '../src/synth-job/synth-job';
+
+const DEFINITION = `
+import { Secret, Trigger, Workflow, WorkflowSet } from '@copperbox/millwright-workflows';
+
+const app = new WorkflowSet({ image: 'public.ecr.aws/docker/library/node:22' });
+const ci = new Workflow(app, 'ci', { on: [Trigger.push({ branches: ['main'] })] });
+ci.job('build', { secrets: { NPM_TOKEN: Secret.named('npm-token') }, steps: ['npm ci'] });
+
+export default app;
+`;
 
 const ENV = {
   MILLWRIGHT_REPO: 'octocat/app',
@@ -278,6 +289,26 @@ describe('runSynthJob', () => {
     expect(h.uploads.get(`${ENV.MILLWRIGHT_DEST_PREFIX}${MODEL_OBJECT}`)?.toString()).toContain(
       'schemaVersion',
     );
+  });
+
+  it('still emits a model when the stored repo config holds a refs/ pattern', async () => {
+    // Regression for the fail-fast flag validation: it must not run against
+    // stored configuration, or every cloud build of a repo added with the old
+    // deployment-guide example would exit 1 before emitting a model.
+    const h = harness({
+      env: {
+        ...ENV,
+        MILLWRIGHT_REPO_CONFIG: '{"secretsAllowedRefs":["main","refs/tags/v*"]}',
+      },
+      checkoutFiles: { 'millwright/workflows.ts': DEFINITION },
+    });
+    h.deps = { ...h.deps, synth: runSynthCommand };
+    const code = await runSynthJob(h.deps);
+    expect(h.stderr.join('')).not.toContain('will never match');
+    expect(code).toBe(0);
+    const model = h.uploads.get(`${ENV.MILLWRIGHT_DEST_PREFIX}${MODEL_OBJECT}`)?.toString();
+    expect(model).toBeDefined();
+    expect(JSON.parse(model!).repo).toBe('octocat/app');
   });
 
   it('skips dependency install when the checkout has no package.json', async () => {

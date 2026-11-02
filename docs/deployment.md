@@ -203,7 +203,7 @@ paste without an installation, and `doctor`'s pulls probe fails outright.
 
 ```sh
 millwright repo add acme/api \
-  --secrets-refs 'refs/heads/main,refs/tags/v*' \
+  --secrets-refs 'main,v*' \
   --fork-prs off \
   --ecr-repos arn:aws:ecr:us-east-1:123456789012:repository/base
 ```
@@ -234,6 +234,12 @@ Flags: `--secrets-refs <patterns>` (comma-separated; **default is none**, i.e. n
 ref receives secrets), `--no-pr-polling`, `--fork-prs on|off` (default off),
 `--ecr-repos <arns>`. `repo update` changes any of them and leaves unspecified
 ones alone; `repo list` prints the current set.
+
+`--secrets-refs` patterns match **short ref names** — `main`, `release/*`,
+`v*` — never `refs/heads/main` or `refs/tags/v*`. The matcher shortens the
+run's ref before comparing, so a `refs/`-prefixed pattern can never match; the
+CLI rejects one outright rather than storing it and quietly running jobs
+without their secrets.
 
 Two benign exits: an empty repo prints that triggers activate on the first push,
 and a repo reporting no default-branch symref skips the bootstrap event and

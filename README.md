@@ -10,6 +10,10 @@ source of truth for code and collaboration; millwright replaces GitHub Actions
 > maintained yet. Treat everything here as a design you can try, not a service
 > you can depend on. Bug reports from people who do try it are the most useful
 > thing right now.
+>
+> The 1.0.0 version number does not change any of this. It is not a release
+> candidate: millwright is a greenfield project, and it has not been proven in
+> real-world workflows.
 
 - **[Spec](docs/specs/1-millwright-v1-implementable-specification.md)** — the
   implementable v1 specification the code is built against.
