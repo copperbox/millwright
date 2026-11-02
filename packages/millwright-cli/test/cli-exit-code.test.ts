@@ -91,6 +91,35 @@ describe('main() exit codes', () => {
     expect(stderr).toContain('boom');
   });
 
+  it('repo add resolves 1 for a refs/-prefixed --secrets-refs pattern, naming the short form', async () => {
+    await expect(
+      main(['node', 'millwright', 'repo', 'add', 'acme/api', '--secrets-refs', 'refs/heads/main,v*']),
+    ).resolves.toBe(1);
+    expect(stderr).toContain('"refs/heads/main" will never match');
+    expect(stderr).toContain('did you mean "main"?');
+  });
+
+  it('synth resolves 1 for a refs/-prefixed --secrets-allowed-refs pattern', async () => {
+    await expect(
+      main([
+        'node',
+        'millwright',
+        'synth',
+        '--entry',
+        fixture(DEFINITION),
+        '--repo',
+        'copperbox/example',
+        '--commit',
+        'deadbeef',
+        '--out',
+        '/dev/null',
+        '--secrets-allowed-refs',
+        'refs/tags/v*',
+      ]),
+    ).resolves.toBe(1);
+    expect(stderr).toContain('did you mean "v*"?');
+  });
+
   it('run resolves 0 only when the local run SUCCEEDED', async () => {
     vi.mocked(localRun).mockResolvedValue({ id: 'local-1', status: 'SUCCEEDED', stateFile: '' });
     await expect(main(['node', 'millwright', 'run', 'ci'])).resolves.toBe(0);

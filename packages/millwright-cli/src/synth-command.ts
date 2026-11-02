@@ -31,7 +31,12 @@ export interface SynthCommandOptions {
   readonly schemaCeiling?: number;
   /** Deployment poll cadence in minutes (enables the cron lint). */
   readonly pollCadence?: number;
-  /** The repo's secretsAllowedRefs config, fail-fast UX only. */
+  /**
+   * The repo's secretsAllowedRefs config, fail-fast UX only. Passed to the
+   * lint verbatim: cloud synth feeds the stored config in here, and a stored
+   * `refs/` pattern must not stop a build (issue #46 leaves existing configs
+   * alone). The CLI validates typed `--secrets-allowed-refs` before calling.
+   */
   readonly secretsAllowedRefs?: readonly string[];
   readonly pretty?: boolean;
   readonly stdout?: (text: string) => void;

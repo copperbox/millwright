@@ -141,6 +141,20 @@ describe('millwright synth', () => {
     expect(result.stderr).toContain('secrets-ref-not-allowed');
   });
 
+  it('still emits a model when the stored config holds a refs/ pattern (cloud synth)', () => {
+    // The synth job passes the repo's stored secretsAllowedRefs straight in.
+    // Older configs may hold refs/-prefixed patterns; flag validation lives
+    // in the CLI action, so the shared command must not reject them here.
+    const result = run(fixture(), {
+      ref: 'main',
+      secretsAllowedRefs: ['main', 'refs/tags/v*'],
+    });
+    expect(result.code).toBe(0);
+    const model = JSON.parse(result.stdout);
+    expect(validateRunModel(model)).toEqual({ ok: true, issues: [] });
+    expect(result.stderr).not.toContain('will never match');
+  });
+
   it('fails clearly when the entry file is missing', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'millwright-empty-'));
     tmpdirs.push(dir);
