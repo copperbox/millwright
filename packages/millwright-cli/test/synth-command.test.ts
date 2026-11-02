@@ -141,6 +141,15 @@ describe('millwright synth', () => {
     expect(result.stderr).toContain('secrets-ref-not-allowed');
   });
 
+  it('rejects refs/-prefixed --secrets-allowed-refs patterns with the short-name suggestion', () => {
+    const result = run(fixture(), { ref: 'main', secretsAllowedRefs: ['refs/heads/main'] });
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain(
+      'millwright: "refs/heads/main" will never match — secretsAllowedRefs patterns use short ref names; did you mean "main"?',
+    );
+  });
+
   it('fails clearly when the entry file is missing', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'millwright-empty-'));
     tmpdirs.push(dir);

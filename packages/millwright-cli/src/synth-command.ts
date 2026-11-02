@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DefinitionLoadError, loadDefinition } from './definition-loader';
 import { createHashFilesResolver } from './hash-files';
+import { secretsRefPatternError } from './secrets-refs-flag';
 
 export const DEFAULT_ENTRY = path.join('millwright', 'workflows.ts');
 
@@ -102,6 +103,12 @@ export function runSynthCommand(options: SynthCommandOptions = {}): number {
   const stderr = options.stderr ?? ((text: string) => process.stderr.write(text));
 
   try {
+    for (const pattern of options.secretsAllowedRefs ?? []) {
+      const message = secretsRefPatternError(pattern);
+      if (message !== undefined) {
+        throw new SynthCommandError(message);
+      }
+    }
     const entry = path.resolve(cwd, options.entry ?? DEFAULT_ENTRY);
     const identity = resolveIdentity(options, cwd);
     const definition = loadDefinition(entry, {

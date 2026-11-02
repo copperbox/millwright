@@ -227,6 +227,17 @@ describe('repo add', () => {
     await expect(repoAdd(deps, { repo: REPO })).rejects.toThrow(/repo update/);
   });
 
+  it('rejects refs/-prefixed --secrets-refs before touching GitHub or SSM', async () => {
+    const ssm = prodSsm();
+    const { deps, githubCalls } = makeDeps(ssm);
+    await expect(
+      repoAdd(deps, { repo: REPO, secretsRefs: ['main', 'refs/heads/develop'] }),
+    ).rejects.toThrow(/"refs\/heads\/develop" will never match .* did you mean "develop"\?/);
+    expect(githubCalls).toEqual([]);
+    expect(ssm.parameters.has(`/millwright/prod/repos/${REPO}/deploy-key`)).toBe(false);
+    expect(ssm.parameters.has(`/millwright/prod/repos/${REPO}/config`)).toBe(false);
+  });
+
   it('rejects malformed repo names', async () => {
     const { deps } = makeDeps(prodSsm());
     await expect(repoAdd(deps, { repo: 'not-a-repo' })).rejects.toThrow(/owner\/repo/);
@@ -279,6 +290,17 @@ describe('repo update', () => {
       forkPrPolicy: 'off',
       ecrPullRepos: ['arn:aws:ecr:us-east-1:1:repository/x'],
     });
+  });
+
+  it('rejects refs/-prefixed --secrets-refs and leaves the stored config alone', async () => {
+    const ssm = prodSsm();
+    const before = serializeRepoConfig({ ...defaultRepoConfig(), secretsAllowedRefs: ['main'] });
+    ssm.set(`/millwright/prod/repos/${REPO}/config`, before);
+    const { deps } = makeDeps(ssm);
+    await expect(repoUpdate(deps, { repo: REPO, secretsRefs: ['refs/tags/v*'] })).rejects.toThrow(
+      /"refs\/tags\/v\*" will never match .* did you mean "v\*"\?/,
+    );
+    expect(ssm.parameters.get(`/millwright/prod/repos/${REPO}/config`)!.Value).toBe(before);
   });
 
   it('refuses to update a repo that was never added', async () => {
