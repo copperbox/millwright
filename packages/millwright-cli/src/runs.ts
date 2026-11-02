@@ -31,6 +31,7 @@ import {
 } from './run-ref';
 import {
   DynamoDocClientLike,
+  RunFilter,
   listCheckStates,
   listRunDetail,
   queryNewestRuns,
@@ -336,6 +337,30 @@ function runDuration(run: RunView, now: () => Date): string {
   return formatDuration(start, end);
 }
 
+/**
+ * Every `RunStatus`, for validating `--status` before it becomes a filter
+ * expression. Typed as a record so a new status fails to compile here
+ * instead of silently becoming "no runs found".
+ */
+const RUN_STATUSES = Object.keys({
+  PENDING: true,
+  QUEUED: true,
+  RUNNING: true,
+  SUCCEEDED: true,
+  FAILED: true,
+  CANCELLED: true,
+} satisfies Record<RunStatus, true>) as RunStatus[];
+
+function parseStatusFilter(value: string): RunStatus {
+  const status = value.toUpperCase();
+  if (!(RUN_STATUSES as string[]).includes(status)) {
+    throw new CommandError(
+      `--status must be one of ${RUN_STATUSES.join(', ')}; got "${value}"`,
+    );
+  }
+  return status as RunStatus;
+}
+
 /** Does a run's full ref match a `--ref` filter given as full or short name? */
 function refMatches(run: RunItem, filter: string): boolean {
   return (
@@ -363,14 +388,15 @@ export interface RunsListOptions extends DiscoverOptions {
   readonly workflow?: string;
   readonly ref?: string;
   readonly status?: string;
-  /** Rows shown after merging; also the per-workflow query depth. */
+  /** Rows shown after merging; also the number of (matching) runs read per workflow. */
   readonly limit?: number;
 }
 
 export async function runsList(deps: RunsDeps, options: RunsListOptions = {}): Promise<RunItem[]> {
   const context = await makeStateReadContext(deps.ssm, deps.ddb, options);
   const limit = options.limit ?? 20;
-  const statusFilter = options.status?.toUpperCase();
+  const statusFilter = options.status === undefined ? undefined : parseStatusFilter(options.status);
+  const refFilter = options.ref;
 
   let workflows = await discoverWorkflows(context);
   if (options.workflow) {
@@ -382,17 +408,17 @@ export async function runsList(deps: RunsDeps, options: RunsListOptions = {}): P
     }
   }
 
+  // Filters are applied while paging, not after: the newest `limit` rows of
+  // a busy workflow may hold none of the matches an older page does.
+  const filter: RunFilter = {
+    status: statusFilter,
+    matches: refFilter ? (run) => refMatches(run, refFilter) : undefined,
+  };
   const runs: RunItem[] = [];
   for (const { repo, workflow } of workflows) {
-    for (const run of await queryNewestRuns(context.ddb, context.stateTable, repo, workflow, limit)) {
-      if (options.ref && !refMatches(run, options.ref)) {
-        continue;
-      }
-      if (statusFilter && run.status !== statusFilter) {
-        continue;
-      }
-      runs.push(run);
-    }
+    runs.push(
+      ...(await queryNewestRuns(context.ddb, context.stateTable, repo, workflow, limit, filter)),
+    );
   }
   runs.sort((a, b) => {
     if (a.createdAt === b.createdAt) {

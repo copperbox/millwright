@@ -151,9 +151,12 @@ millwright runs show [<run>]
 millwright logs [<run>] [-f|--follow] [--job <name>] [--failed] [--full]
 ```
 
-- `runs list` shows recent runs newest first; `--limit` defaults to 20,
-  `--status` takes a run status (`RUNNING`, `FAILED`, …), `--workflow` accepts
-  a bare name or `owner/repo/name`, `--ref` accepts short or full ref form.
+- `runs list` shows recent runs newest first; `--limit` (a positive integer,
+  default 20) caps the rows shown, `--status` takes a run status (`RUNNING`,
+  `FAILED`, …), `--workflow` accepts a bare name or `owner/repo/name`, `--ref`
+  accepts short or full ref form. `--ref` and `--status` search each
+  workflow's whole run history, newest first, until `--limit` matches are
+  found — a branch whose runs are older than the newest page still lists.
 - `runs show` renders one run's jobs and steps, including job reuse, skip
   reasons, supersession, and abandoned check reporting, with a CloudWatch
   console deep link per job log stream. It also reads local runs: `millwright
