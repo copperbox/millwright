@@ -249,7 +249,12 @@ export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderS
     }
   }
 
-  async finishRun(coords: RunCoordinates, status: RunItem['status'], nowMs: number): Promise<void> {
-    await finishRunConditionally(this.client, this.tableName, coords, status, nowMs);
+  async finishRun(
+    coords: RunCoordinates,
+    status: RunItem['status'],
+    sequence: number,
+    nowMs: number,
+  ): Promise<boolean> {
+    return finishRunConditionally(this.client, this.tableName, coords, status, nowMs, { sequence });
   }
 }

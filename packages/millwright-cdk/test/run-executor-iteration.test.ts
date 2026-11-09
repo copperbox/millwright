@@ -295,10 +295,19 @@ class MemoryStore implements DeciderStore {
     });
   }
 
-  async finishRun(coords: RunCoordinates, status: RunItem['status'], nowMs: number): Promise<void> {
+  async finishRun(
+    coords: RunCoordinates,
+    status: RunItem['status'],
+    sequence: number,
+    nowMs: number,
+  ): Promise<boolean> {
     const run = this.runOf(coords);
     if (!run || !['PENDING', 'QUEUED', 'RUNNING'].includes(run.status)) {
-      return;
+      return false;
+    }
+    // The DynamoDB fence: only the run's current iteration may end it.
+    if (run.deciderSequence !== sequence) {
+      return false;
     }
     const key = runKey(coords);
     const { taskToken: _dropped, ...rest } = run;
@@ -307,6 +316,7 @@ class MemoryStore implements DeciderStore {
       status,
       finishedAt: new Date(nowMs).toISOString(),
     });
+    return true;
   }
 
   async getGroup(group: string): Promise<ConcurrencyGroupItem | undefined> {
@@ -877,6 +887,65 @@ describe('decider iteration — per-job checks (spec §13.2 lifecycle, #51)', ()
     ]);
     expect(phase(store.checkHistory('build').at(-1)!)).toBe('completed/failure');
     expect(phase(store.checkHistory('test').at(-1)!)).toBe('completed/skipped');
+  });
+
+  it('leaves completion to the current iteration when a stalled older one observes it first', async () => {
+    const single: RunModel = {
+      ...MODEL,
+      workflows: [{ name: 'ci', jobs: [{ name: 'build', image: 'node:22', steps: [{ run: 'make' }] }] }],
+    };
+    const { store, runner, sender, deps } = harness(single);
+    store.seedRun();
+
+    // Iteration A writes its token (sequence 1), then stalls loading the model.
+    let releaseA!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    let loads = 0;
+    const gated: DeciderDeps = {
+      ...deps,
+      models: {
+        load: async () => {
+          if (loads++ === 0) {
+            await gate;
+          }
+          return single;
+        },
+      },
+    };
+    const a = iterate(gated, 0, NOW, 'token-a');
+    while (store.run().deciderSequence !== 1) {
+      await Promise.resolve();
+    }
+
+    // The 60 s timeout re-enters: B (sequence 2) dispatches the build and
+    // writes in_progress. The build then succeeds before A resumes.
+    expect(await iterate(gated, 1, NOW + 60_000, 'token-b')).toBe('parked');
+    expect(store.checkHistory('build').map(phase)).toEqual(['in_progress']);
+    runner.finish('mw-builds:1', 'SUCCEEDED');
+
+    // A resumes and observes the success, but it is no longer the current
+    // iteration: its completed write loses to B's ownerSequence and it must
+    // NOT end the run either, or nothing would ever complete the check.
+    releaseA();
+    expect(await a).toBe('superseded');
+    expect(store.rejectedChecks.map((w) => [w.context, w.ownerSequence])).toEqual([
+      ['ci / build', 1],
+    ]);
+    expect(phase(store.checkHistory('build').at(-1)!)).toBe('in_progress');
+    expect(store.run()).toMatchObject({ status: 'RUNNING', deciderSequence: 2 });
+    expect(sender.successes.map((s) => s.taskToken)).not.toContain('token-a');
+
+    // The current iteration re-derives the completion and writes the check.
+    expect(await iterate(gated, 2, NOW + 120_000, 'token-c')).toBe('terminal');
+    expect(phase(store.checkHistory('build').at(-1)!)).toBe('completed/success');
+    expect(store.checks.at(-1)!.write.ownerSequence).toBe(3);
+    expect(store.run()).toMatchObject({ status: 'SUCCEEDED', deciderSequence: 3 });
+    expect(sender.successes.at(-1)).toMatchObject({
+      taskToken: 'token-c',
+      output: { outcome: 'terminal', runStatus: 'SUCCEEDED' },
+    });
   });
 
   it('deep-links a check to its build log stream when the deployment’s log location is known', async () => {

@@ -142,8 +142,19 @@ export interface DeciderStore extends GroupSlotStore {
     patch: JobProjectionPatch,
     nowMs: number,
   ): Promise<void>;
-  /** Mark the run terminal and clear its token; a no-op if already terminal. */
-  finishRun(coords: RunCoordinates, status: RunItem['status'], nowMs: number): Promise<void>;
+  /**
+   * Mark the run terminal and clear its token, conditioned on the run still
+   * being live AND `deciderSequence` still equal to this iteration's
+   * `sequence`. False when either fails: the run is already terminal, or a
+   * later iteration began meanwhile, so this one is stale and its conclusion
+   * belongs to the current iteration instead.
+   */
+  finishRun(
+    coords: RunCoordinates,
+    status: RunItem['status'],
+    sequence: number,
+    nowMs: number,
+  ): Promise<boolean>;
 }
 
 export interface BuildRunner {
@@ -181,7 +192,12 @@ export interface DeciderDeps {
   readonly log: (message: string, fields?: Record<string, unknown>) => void;
 }
 
-export type IterationOutcome = 'parked' | 'terminal' | 'carry-over' | 'failed';
+/**
+ * `superseded`: a later iteration began while this one ran, so its terminal
+ * conclusion was not written and its (already overwritten) token not
+ * completed. The current iteration re-derives the same conclusion.
+ */
+export type IterationOutcome = 'parked' | 'terminal' | 'carry-over' | 'failed' | 'superseded';
 
 /** The decider's SendTaskSuccess payloads — what the state machine routes on. */
 export type DeciderOutput =
@@ -429,7 +445,29 @@ export async function runDeciderIteration(
   );
 
   if (actions.runStatus !== 'RUNNING') {
-    await store.finishRun(coords, actions.runStatus, nowMs);
+    // The terminal transition is fenced on this iteration still being the
+    // run's current one. A stalled iteration that resumes after a later one
+    // began (the 60 s timeout re-entered the loop) may well observe the
+    // completion first, but its check writes just lost to the later
+    // iteration's ownerSequence; ending the run here would leave the loop
+    // exiting on a terminal run with the GitHub checks stuck in_progress.
+    // The later iteration re-derives the same conclusion from ground truth
+    // and its terminal pass rewrites every check.
+    if (!(await store.finishRun(coords, actions.runStatus, begun.sequence, nowMs))) {
+      const current = await store.getRun(coords);
+      if (current && !TERMINAL_RUN_STATUSES.includes(current.status)) {
+        log('terminal decision superseded by a later iteration; leaving completion to it', {
+          runId: formatRunId(coords),
+          sequence: begun.sequence,
+          currentSequence: current.deciderSequence,
+        });
+        return 'superseded';
+      }
+      // Already finished by another writer: converge on its answer.
+      await releaseGroup(deps, current, nowMs);
+      await sender.success(input.taskToken, terminal(current?.status ?? actions.runStatus));
+      return 'terminal';
+    }
     await releaseGroup(deps, run, nowMs);
     await sender.success(input.taskToken, terminal(actions.runStatus));
     log('run finished', { runId: formatRunId(coords), status: actions.runStatus });
