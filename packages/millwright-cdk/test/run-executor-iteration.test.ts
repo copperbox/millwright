@@ -2,18 +2,24 @@ import {
   BuildMappingItem,
   BuildOutcome,
   ConcurrencyGroupItem,
+  DesiredCheckState,
   JobItem,
   RunCoordinates,
   RunItem,
   RunModel,
   RunModelJob,
+  StepItem,
   buildMappingKey,
   concurrencyGroupKey,
   formatRunId,
   jobKey,
+  parseDesiredCheckState,
   runKey,
+  serializeDesiredCheckState,
+  stepKey,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
+import { DesiredCheckWrite } from '../src/runtime/shared/checks';
 import { JobProjectionPatch } from '../src/runtime/shared/jobs';
 import {
   BuildRunner,
@@ -51,6 +57,10 @@ class MemoryStore implements DeciderStore {
   readonly jobs = new Map<string, JobItem>();
   readonly mappings = new Map<string, BuildMappingItem>();
   readonly groups = new Map<string, { running?: string; pending?: string }>();
+  readonly steps = new Map<string, StepItem>();
+  readonly checks: { write: DesiredCheckWrite; nowMs: number }[] = [];
+  failCheckWrites = false;
+  checksOwnedByNewerRun = false;
 
   seedRun(overrides: Partial<RunItem> = {}, coords: RunCoordinates = COORDS): void {
     const key = runKey(coords);
@@ -99,10 +109,43 @@ class MemoryStore implements DeciderStore {
     return 'ok';
   }
 
-  async listJobs(coords: RunCoordinates): Promise<readonly JobItem[]> {
-    return [...this.jobs.values()].filter(
-      (job) => job.repo === coords.repo && job.runNumber === coords.runNumber,
-    );
+  async listRunRows(
+    coords: RunCoordinates,
+  ): Promise<{ jobs: readonly JobItem[]; steps: readonly StepItem[] }> {
+    const of = (row: { repo: string; runNumber: number }) =>
+      row.repo === coords.repo && row.runNumber === coords.runNumber;
+    return {
+      jobs: [...this.jobs.values()].filter(of),
+      steps: [...this.steps.values()].filter(of),
+    };
+  }
+
+  seedStep(job: string, stepIndex: number, overrides: Partial<StepItem> = {}): void {
+    const key = stepKey(COORDS, job, stepIndex);
+    this.steps.set(key.pk + key.sk, {
+      ...key,
+      ...COORDS,
+      job,
+      stepIndex,
+      status: 'SUCCEEDED',
+      expiresAt: 0,
+      ...overrides,
+    });
+  }
+
+  async putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean> {
+    if (this.failCheckWrites) {
+      throw new Error('injected check-table error');
+    }
+    this.checks.push({ write, nowMs });
+    return !this.checksOwnedByNewerRun;
+  }
+
+  /** The check writes for one job, oldest first, as the reporter would read them. */
+  checkHistory(job: string): DesiredCheckState[] {
+    return this.checks
+      .filter((c) => c.write.context === `ci / ${job}`)
+      .map((c) => parseDesiredCheckState(serializeDesiredCheckState(c.write.desired)));
   }
 
   async claimDispatch(
@@ -673,5 +716,114 @@ describe('decider iteration — concurrency-group hand-off (spec §8.4)', () => 
       outcome: 'terminal',
       runStatus: 'CANCELLED',
     });
+  });
+});
+
+describe('decider iteration — per-job checks (spec §13.2 lifecycle, #51)', () => {
+  const phase = (d: DesiredCheckState) => (d.conclusion ? `${d.status}/${d.conclusion}` : d.status);
+
+  it('walks one job from queued through in_progress to success, owned by the run', async () => {
+    const { store, runner, deps } = harness();
+    store.seedRun();
+
+    // Synth is done, the loop begins: the root dispatches (in_progress), its
+    // dependent is created queued.
+    await iterate(deps, 0, NOW);
+    expect(store.checkHistory('build').map(phase)).toEqual(['in_progress']);
+    expect(store.checkHistory('test').map(phase)).toEqual(['queued']);
+
+    runner.finish('mw-builds:1', 'SUCCEEDED');
+    await iterate(deps, 1, NOW + 60_000);
+    expect(store.checkHistory('build').map(phase)).toEqual(['in_progress', 'completed/success']);
+    expect(store.checkHistory('test').map(phase)).toEqual(['queued', 'in_progress']);
+
+    runner.finish('mw-builds:2', 'SUCCEEDED');
+    expect(await iterate(deps, 2, NOW + 120_000)).toBe('terminal');
+    expect(store.checkHistory('test').map(phase)).toEqual([
+      'queued',
+      'in_progress',
+      'completed/success',
+    ]);
+    expect(phase(store.checkHistory('build').at(-1)!)).toBe('completed/success');
+
+    for (const { write, nowMs } of store.checks) {
+      expect(write).toMatchObject({ repo: 'octo/app', sha: SHA, ownerRun: 'ci#7', ownerRunNumber: 7 });
+      expect(write.context).toMatch(/^ci \/ (build|test)$/);
+      expect(write.desired.summary).toContain('ci#7');
+      expect(nowMs).toBeGreaterThanOrEqual(NOW);
+    }
+  });
+
+  it('writes nothing when an iteration changes nothing', async () => {
+    const { store, deps } = harness();
+    store.seedRun();
+    await iterate(deps, 0, NOW);
+    const written = store.checks.length;
+    await iterate(deps, 1, NOW + 60_000); // build still IN_PROGRESS, test still queued
+    expect(store.checks).toHaveLength(written);
+  });
+
+  it('reports failure with the step table and triage command, and skipped dependents as skipped', async () => {
+    const { store, runner, deps } = harness();
+    store.seedRun();
+    await iterate(deps, 0, NOW);
+    store.seedStep('build', 0, {
+      name: 'npm ci',
+      status: 'SUCCEEDED',
+      startedAt: new Date(NOW).toISOString(),
+      finishedAt: new Date(NOW + 4_000).toISOString(),
+    });
+    store.seedStep('build', 1, { name: 'npm test', status: 'FAILED' });
+    runner.finish('mw-builds:1', 'FAILED');
+
+    expect(await iterate(deps, 1, NOW + 60_000)).toBe('terminal');
+    expect(store.run().status).toBe('FAILED');
+
+    const build = store.checkHistory('build').at(-1)!;
+    expect(phase(build)).toBe('completed/failure');
+    expect(build.summary).toContain('| npm ci | SUCCEEDED | 4s |');
+    expect(build.summary).toContain('| npm test | FAILED | — |');
+    expect(build.summary).toContain('millwright logs ci#7 --job build');
+
+    const test = store.checkHistory('test').at(-1)!;
+    expect(phase(test)).toBe('completed/skipped');
+    expect(test.summary).not.toContain('millwright logs');
+  });
+
+  it('reports cancellation for live and never-started jobs alike', async () => {
+    const { store, deps } = harness();
+    store.seedRun();
+    await iterate(deps, 0, NOW);
+    store.seedRun({
+      status: 'RUNNING',
+      startedAt: new Date(NOW).toISOString(),
+      cancelRequested: true,
+    });
+    expect(await iterate(deps, 1, NOW + 60_000)).toBe('terminal');
+    expect(phase(store.checkHistory('build').at(-1)!)).toBe('completed/cancelled');
+    expect(phase(store.checkHistory('test').at(-1)!)).toBe('completed/cancelled');
+  });
+
+  it('reports rerun-reused jobs as succeeded at once', async () => {
+    const { store, deps } = harness();
+    store.seedRun({ rerunOf: 'octo/app#ci#6', reuseJobs: ['build'] });
+    await iterate(deps, 0, NOW);
+    expect(store.checkHistory('build').map(phase)).toEqual(['completed/success']);
+    expect(store.checkHistory('test').map(phase)).toEqual(['in_progress']);
+  });
+
+  it('never lets a check write failure or a lost ownership race fail the iteration', async () => {
+    const failing = harness();
+    failing.store.seedRun();
+    failing.store.failCheckWrites = true;
+    expect(await iterate(failing.deps, 0, NOW)).toBe('parked');
+    expect(failing.store.run().status).toBe('RUNNING');
+    expect(failing.runner.started.map((s) => s.job)).toEqual(['build']);
+
+    const owned = harness();
+    owned.store.seedRun();
+    owned.store.checksOwnedByNewerRun = true;
+    expect(await iterate(owned.deps, 0, NOW)).toBe('parked');
+    expect(owned.store.checks.length).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,6 @@
 import {
   BuildOutcome,
   DeciderJobState,
-  JobItem,
   JobStatus,
   RunCoordinates,
   RunItem,
@@ -15,9 +14,11 @@ import {
   parseRunId,
   workflowFromModel,
 } from '@copperbox/millwright-state';
+import { DesiredCheckWrite } from '../shared/checks';
 import { carryOverExecutionName } from '../shared/executions';
 import { GroupSlotStore, PendingRunStarter, releaseGroupSlot } from '../shared/groups';
-import { JobProjectionPatch } from '../shared/jobs';
+import { JobProjectionPatch, RunRows } from '../shared/jobs';
+import { planJobCheckWrites } from './job-checks';
 
 /**
  * One decider iteration (spec §7.3, C6): the Lambda host around the pure
@@ -80,7 +81,13 @@ export interface DeciderStore extends GroupSlotStore {
     opts: { readonly markStarted: boolean },
     nowMs: number,
   ): Promise<'ok' | 'terminal'>;
-  listJobs(coords: RunCoordinates): Promise<readonly JobItem[]>;
+  /** The run's job rows plus its step rows (for the job checks' step table). */
+  listRunRows(coords: RunCoordinates): Promise<RunRows>;
+  /**
+   * The §13.2 ownership upsert onto a job's check item. False when a newer
+   * run owns the context — the caller drops the write silently.
+   */
+  putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean>;
   /**
    * Seed a reused job's row terminal SUCCEEDED with `reusedFrom` (spec §7.7,
    * `rerun --failed`). Conditional on the row not existing — a no-op when a
@@ -240,8 +247,12 @@ export async function runDeciderIteration(
     return 'failed';
   }
 
-  const rows = await store.listJobs(coords);
+  const { jobs: rows, steps } = await store.listRunRows(coords);
   const rowByName = new Map(rows.map((row) => [row.job, row]));
+  // Job statuses before and after this iteration's row writes: the job
+  // checks (spec §13.2) are written on phase changes between the two.
+  const statusBefore = new Map<string, JobStatus>(rows.map((row) => [row.job, row.status]));
+  const statusAfter = new Map<string, JobStatus>(statusBefore);
 
   // Rerun --failed (spec §7.7): the launcher prefix-copied these jobs'
   // outputs; the decider seeds them terminal SUCCEEDED with reusedFrom so
@@ -253,6 +264,7 @@ export async function runDeciderIteration(
         continue;
       }
       await store.seedReusedJob(coords, jobName, run.rerunOf, nowMs);
+      statusAfter.set(jobName, 'SUCCEEDED');
       rowByName.set(jobName, {
         ...jobKey(coords, jobName),
         ...coords,
@@ -290,6 +302,7 @@ export async function runDeciderIteration(
         },
         nowMs,
       );
+      statusAfter.set(row.job, projected);
     }
   }
 
@@ -330,6 +343,7 @@ export async function runDeciderIteration(
       { status: mark.status, skipReason: mark.skipReason, finishedAt: nowIso },
       nowMs,
     );
+    statusAfter.set(mark.job, mark.status);
   }
 
   for (const jobName of actions.dispatch) {
@@ -339,6 +353,7 @@ export async function runDeciderIteration(
       log('lost dispatch claim to a concurrent iteration', { job: jobName });
       continue;
     }
+    statusAfter.set(jobName, 'QUEUED');
     try {
       const { buildId, buildArn } = await runner.start(job, {
         coords,
@@ -356,6 +371,23 @@ export async function runDeciderIteration(
       });
     }
   }
+
+  // Job checks (spec §13.2): queued on first sight, in_progress on dispatch,
+  // a conclusion on terminal — every job once more when the run finishes.
+  await reportJobChecks(
+    deps,
+    planJobCheckWrites({
+      coords,
+      sha: run.sha,
+      workflow: jobsModel,
+      before: statusBefore,
+      after: statusAfter,
+      steps,
+      firstIteration: markStarted,
+      terminal: actions.runStatus !== 'RUNNING',
+    }),
+    nowMs,
+  );
 
   if (actions.runStatus !== 'RUNNING') {
     await store.finishRun(coords, actions.runStatus, nowMs);
@@ -394,6 +426,36 @@ export async function runDeciderIteration(
 
 function terminal(runStatus: RunItem['status']): DeciderOutput {
   return { outcome: 'terminal', runStatus };
+}
+
+/**
+ * Send the planned job-check upserts. Best-effort by design: checks are a
+ * projection of run state onto GitHub, never an input to it, so neither a
+ * table error nor a lost ownership race (a newer run owns the context) may
+ * fail the iteration. The run-terminal pass rewrites every job, so a write
+ * lost here is repaired at the latest when the run finishes.
+ */
+async function reportJobChecks(
+  deps: DeciderDeps,
+  writes: readonly DesiredCheckWrite[],
+  nowMs: number,
+): Promise<void> {
+  for (const write of writes) {
+    try {
+      if (!(await deps.store.putDesiredCheck(write, nowMs))) {
+        deps.log('job check owned by a newer run; not updated', {
+          context: write.context,
+          runId: write.ownerRun,
+        });
+      }
+    } catch (err) {
+      deps.log('could not write job check', {
+        context: write.context,
+        runId: write.ownerRun,
+        error: (err as Error).message,
+      });
+    }
+  }
 }
 
 /**

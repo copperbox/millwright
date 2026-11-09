@@ -3,6 +3,7 @@ import {
   JobStatus,
   RunCoordinates,
   SkipReason,
+  StepItem,
   expiresAtAfterDays,
   jobKey,
   runPartitionKey,
@@ -75,13 +76,23 @@ export function jobProjectionUpdate(
   };
 }
 
-/** A run's job rows (its `JOB#` sort keys, step rows filtered out). */
-export async function queryJobRows(
+export interface RunRows {
+  readonly jobs: readonly JobItem[];
+  readonly steps: readonly StepItem[];
+}
+
+/**
+ * A run's job AND step rows in one query: both live under the `JOB#` sort
+ * prefix (`JOB#<name>` / `JOB#<name>#STEP#<i>`), so the decider gets the
+ * per-step table for job checks at no extra read.
+ */
+export async function queryRunRows(
   client: DynamoDBDocumentClient,
   tableName: string,
   coords: RunCoordinates,
-): Promise<readonly JobItem[]> {
-  const items: JobItem[] = [];
+): Promise<RunRows> {
+  const jobs: JobItem[] = [];
+  const steps: StepItem[] = [];
   let lastKey: Record<string, unknown> | undefined;
   do {
     const result = await client.send(
@@ -94,14 +105,24 @@ export async function queryJobRows(
       }),
     );
     for (const item of result.Items ?? []) {
-      // The JOB# prefix also matches step rows (JOB#<name>#STEP#<i>).
-      if (!(item.sk as string).includes('#STEP#')) {
-        items.push(item as JobItem);
+      if ((item.sk as string).includes('#STEP#')) {
+        steps.push(item as StepItem);
+      } else {
+        jobs.push(item as JobItem);
       }
     }
     lastKey = result.LastEvaluatedKey;
   } while (lastKey);
-  return items;
+  return { jobs, steps };
+}
+
+/** A run's job rows (its `JOB#` sort keys, step rows filtered out). */
+export async function queryJobRows(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  coords: RunCoordinates,
+): Promise<readonly JobItem[]> {
+  return (await queryRunRows(client, tableName, coords)).jobs;
 }
 
 export function isConditionalCheckFailure(err: unknown): boolean {

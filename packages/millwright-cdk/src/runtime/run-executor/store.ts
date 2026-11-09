@@ -9,12 +9,14 @@ import {
   runKey,
 } from '@copperbox/millwright-state';
 import { PutCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DesiredCheckWrite, sendDesiredCheckUpsert } from '../shared/checks';
 import { DynamoGroupSlotStore } from '../shared/groups';
 import {
   JobProjectionPatch,
+  RunRows,
   isConditionalCheckFailure,
   jobProjectionUpdate,
-  queryJobRows,
+  queryRunRows,
 } from '../shared/jobs';
 import { finishRunConditionally } from '../shared/runs';
 import { DeciderStore } from './iteration';
@@ -66,8 +68,18 @@ export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderS
     }
   }
 
-  async listJobs(coords: RunCoordinates): Promise<readonly JobItem[]> {
-    return queryJobRows(this.client, this.tableName, coords);
+  async listRunRows(coords: RunCoordinates): Promise<RunRows> {
+    return queryRunRows(this.client, this.tableName, coords);
+  }
+
+  async putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean> {
+    return sendDesiredCheckUpsert(
+      this.client,
+      this.tableName,
+      write,
+      nowMs,
+      this.metadataRetentionDays,
+    );
   }
 
   async seedReusedJob(
