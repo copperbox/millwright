@@ -1,5 +1,11 @@
 # Update Log
 
+## 2026-11-09
+* **Update**: Synth failures now end runs FAILED and release their group slot; the sweep closes
+  non-terminal occupants whose execution has closed — [Concurrency groups](/architecture/concurrency-groups.md),
+  [Degradation, quarantine, and the sweep](/operations/degradation.md),
+  [Control-plane role inventory](/security/control-plane-roles.md).
+
 ## 2026-09-08
 * Record why CDK construct tests share one outdir and why vitest's timeout is 30 s
 

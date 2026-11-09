@@ -35,6 +35,9 @@ previous one runs is **self-throttled**. There is a counter and alarm on sustain
 
 - **Concurrency-group crash safety** — detects groups whose running run is terminal but whose slot
   never cleared, and starts the pending run. It repairs *slots*; it never resurrects executions.
+  A non-terminal occupant (PENDING/RUNNING) whose run-executor execution has already **closed** —
+  following the carry-over name chain — is marked FAILED and released the same way
+  (`states:DescribeExecution`). Hop 0 missing means the launcher has not started it yet: live.
 - **Stale job-role housekeeping** — deletes role pairs whose `(workflow, job)` no longer appears in
   any registry entry after 30 days.
 

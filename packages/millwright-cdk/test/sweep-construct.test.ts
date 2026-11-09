@@ -58,6 +58,21 @@ describe('sweep construct (C16)', () => {
         ]),
       },
     });
+    // Occupant liveness: DescribeExecution on the machine's executions.
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'states:DescribeExecution',
+            Resource: Match.objectLike({
+              'Fn::Join': Match.arrayWith([
+                Match.arrayWith([Match.stringLikeRegexp(':execution:ci-run-executor:\\*')]),
+              ]),
+            }),
+          }),
+        ]),
+      },
+    });
     const statements = Object.values(template.findResources('AWS::IAM::Policy')).flatMap(
       (resource: any) => resource.Properties.PolicyDocument.Statement,
     );

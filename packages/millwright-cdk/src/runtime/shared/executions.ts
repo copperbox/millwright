@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import type { SFNClient } from '@aws-sdk/client-sfn';
-import { StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { DescribeExecutionCommand, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   RunItem,
+  executionArn,
   executionName,
   formatRunId,
   synthExecutionName,
@@ -60,6 +62,38 @@ export interface SynthOnlyExecutionInput {
  */
 export { executionName };
 
+/**
+ * The name the launcher (and the group hand-off) starts a run's execution
+ * under — derivable from the run row alone, which is how the sweep finds a
+ * run's execution again without storing its ARN.
+ */
+export function runExecutionName(run: RunItem): string {
+  return executionName('run', `${run.repo}-${run.workflow}-${run.runNumber}`, formatRunId(run));
+}
+
+/**
+ * Deterministic, chainable carry-over execution name: each generation hashes
+ * its predecessor's name, so retries within one execution reuse the same
+ * name (idempotent under ExecutionAlreadyExists) while successive
+ * generations never collide. Shared with the sweep, which walks the same
+ * chain forward to find a long run's current execution.
+ */
+export function carryOverExecutionName(currentExecutionName: string): string {
+  return `co-${createHash('sha256').update(currentExecutionName).digest('hex').slice(0, 40)}`;
+}
+
+/**
+ * Whether an execution of the run executor is still open. 'missing' is its
+ * own answer: before the launcher's StartExecution lands the execution does
+ * not exist yet, and after a carry-over the successor may not exist because
+ * the chain ended there — callers decide which it is from the hop.
+ */
+export type ExecutionLiveness = 'running' | 'closed' | 'missing';
+
+export interface ExecutionInspector {
+  describe(name: string): Promise<ExecutionLiveness>;
+}
+
 export class SfnExecutionStarter implements ExecutionStarter {
   constructor(
     private readonly client: SFNClient,
@@ -81,10 +115,7 @@ export class SfnExecutionStarter implements ExecutionStarter {
       ...(run.inputs ? { inputs: run.inputs } : {}),
       ...(run.rerunOf ? { resume: true as const } : {}),
     };
-    await this.start(
-      executionName('run', `${run.repo}-${run.workflow}-${run.runNumber}`, runId),
-      input,
-    );
+    await this.start(runExecutionName(run), input);
   }
 
   async startSynthOnly(repo: string, ref: string, sha: string): Promise<void> {
@@ -107,6 +138,30 @@ export class SfnExecutionStarter implements ExecutionStarter {
       if ((err as { name?: string })?.name === 'ExecutionAlreadyExists') {
         this.log('execution already started', { name });
         return;
+      }
+      throw err;
+    }
+  }
+}
+
+/** `DescribeExecution` on the run executor, by execution name. */
+export class SfnExecutionInspector implements ExecutionInspector {
+  constructor(
+    private readonly client: SFNClient,
+    private readonly stateMachineArn: string,
+  ) {}
+
+  async describe(name: string): Promise<ExecutionLiveness> {
+    const arn = executionArn(this.stateMachineArn, name);
+    if (!arn) {
+      throw new Error(`Not a state machine ARN: ${this.stateMachineArn}`);
+    }
+    try {
+      const result = await this.client.send(new DescribeExecutionCommand({ executionArn: arn }));
+      return result.status === 'RUNNING' ? 'running' : 'closed';
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'ExecutionDoesNotExist') {
+        return 'missing';
       }
       throw err;
     }

@@ -17,6 +17,15 @@
  * - Carry-over: the terminal state StartExecutions a fresh execution of the
  *   same machine under the decider-derived deterministic name, resuming
  *   from table state (`resume: true` skips synth).
+ *
+ * Synth-failure protocol (pinned): both synth-phase tasks catch into
+ * `RouteSynthFailure`. A `run` execution passes through
+ * `RecordSynthFailure` — the run row goes FAILED, its concurrency slot is
+ * released, the synth check records the cause — and the execution STILL ends
+ * in `SynthFailed`, whether that step succeeded or not, so doctor's redrive
+ * guidance holds and the original `$.synthError` is never overwritten.
+ * Bootstrap (`synth-only`) executions have no run row and go straight to
+ * `SynthFailed`.
  */
 
 export interface RunExecutorDefinitionProps {
@@ -25,6 +34,11 @@ export interface RunExecutorDefinitionProps {
   readonly synthFunctionArn: string;
   /** The post-synth validation/registry Lambda (pinned name, same issue). */
   readonly postSynthFunctionArn: string;
+  /**
+   * The synth-failure step: marks a run FAILED and releases its group slot
+   * when synth or post-synth fails before the decider loop ever began.
+   */
+  readonly synthFailureFunctionArn: string;
   /** This machine's own ARN — the carry-over StartExecution target. */
   readonly stateMachineArn: string;
   /** The decider-loop token wait; 60 s per spec §7.3. @default 60 */
@@ -89,7 +103,9 @@ export function renderRunExecutorDefinition(
             MaxAttempts: 5,
           },
         ],
-        Catch: [{ ErrorEquals: ['States.ALL'], ResultPath: '$.synthError', Next: 'SynthFailed' }],
+        Catch: [
+          { ErrorEquals: ['States.ALL'], ResultPath: '$.synthError', Next: 'RouteSynthFailure' },
+        ],
         Next: 'PostSynth',
       },
       // Control-plane side of the synth trust boundary (spec §7.2): read
@@ -111,7 +127,9 @@ export function renderRunExecutorDefinition(
             MaxAttempts: 5,
           },
         ],
-        Catch: [{ ErrorEquals: ['States.ALL'], ResultPath: '$.synthError', Next: 'SynthFailed' }],
+        Catch: [
+          { ErrorEquals: ['States.ALL'], ResultPath: '$.synthError', Next: 'RouteSynthFailure' },
+        ],
         Next: 'IsSynthOnly',
       },
       IsSynthOnly: {
@@ -122,6 +140,46 @@ export function renderRunExecutorDefinition(
         Default: 'InitLoop',
       },
       SynthOnlyComplete: { Type: 'Succeed' },
+      // A run that fails synth never reaches the decider loop, which is the
+      // only other place a run row turns terminal and a group slot is
+      // released: close it out here. Bootstraps have no run row.
+      RouteSynthFailure: {
+        Type: 'Choice',
+        Choices: [
+          {
+            And: [
+              { Variable: '$.action', IsPresent: true },
+              { Variable: '$.action', StringEquals: 'run' },
+            ],
+            Next: 'RecordSynthFailure',
+          },
+        ],
+        Default: 'SynthFailed',
+      },
+      // Both paths out of here end in SynthFailed. The cleanup's own error
+      // lands under a separate ResultPath so $.synthError — the reason the
+      // operator is looking at this execution — survives intact.
+      RecordSynthFailure: {
+        Type: 'Task',
+        Resource: 'arn:aws:states:::lambda:invoke',
+        Parameters: {
+          FunctionName: props.synthFailureFunctionArn,
+          Payload: { 'input.$': '$', 'synthError.$': '$.synthError' },
+        },
+        ResultPath: '$.synthFailure',
+        Retry: [
+          {
+            ErrorEquals: [...LAMBDA_TRANSIENT_ERRORS, 'States.TaskFailed'],
+            IntervalSeconds: 2,
+            BackoffRate: 2,
+            MaxAttempts: 3,
+          },
+        ],
+        Catch: [
+          { ErrorEquals: ['States.ALL'], ResultPath: '$.synthFailureError', Next: 'SynthFailed' },
+        ],
+        Next: 'SynthFailed',
+      },
       SynthFailed: {
         Type: 'Fail',
         Error: 'SynthFailed',

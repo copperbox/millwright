@@ -20,7 +20,8 @@ only via the guarded paths in [Job roles](job-roles.md).
 | **Build-events handler** | job-row updates via `BUILD#` lookup; `states:SendTaskSuccess`/`SendTaskFailure`. |
 | **Step-events writer (C19)** | step-row writes only. |
 | **Reporter** | state table + stream; App-token minting (reads the App PEM); sole owner of check reconciliation. |
-| **Sweep** | group repair (`states:StartExecution`), stale-role housekeeping (same IAM conditions as the decider). |
+| **Sweep** | group repair (`states:StartExecution`, `states:DescribeExecution` on the run executor's executions), stale-role housekeeping (same IAM conditions as the decider). |
+| **Synth-failure step** | run-row terminal write, group-slot release, synth-check desired state; `states:StartExecution` for the hand-off. |
 | **CLI (operator IAM)** | `cancelRequested` write, `states:SendTaskSuccess`, `events:PutEvents` conditioned to `source: millwright.cli`. |
 
 ## The decider's escalation guards

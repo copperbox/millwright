@@ -16,6 +16,7 @@ import {
   jobProjectionUpdate,
   queryJobRows,
 } from '../shared/jobs';
+import { finishRunConditionally } from '../shared/runs';
 import { DeciderStore } from './iteration';
 
 /**
@@ -213,27 +214,6 @@ export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderS
   }
 
   async finishRun(coords: RunCoordinates, status: RunItem['status'], nowMs: number): Promise<void> {
-    try {
-      await this.client.send(
-        new UpdateCommand({
-          TableName: this.tableName,
-          Key: runKey(coords),
-          UpdateExpression: 'SET #status = :status, finishedAt = :now REMOVE taskToken',
-          ConditionExpression: '#status IN (:pending, :queued, :running)',
-          ExpressionAttributeNames: { '#status': 'status' },
-          ExpressionAttributeValues: {
-            ':status': status,
-            ':now': new Date(nowMs).toISOString(),
-            ':pending': 'PENDING',
-            ':queued': 'QUEUED',
-            ':running': 'RUNNING',
-          },
-        }),
-      );
-    } catch (err) {
-      if (!isConditionalCheckFailure(err)) {
-        throw err;
-      }
-    }
+    await finishRunConditionally(this.client, this.tableName, coords, status, nowMs);
   }
 }

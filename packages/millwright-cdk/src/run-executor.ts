@@ -50,6 +50,11 @@ export class RunExecutor extends Construct {
   readonly deciderFn: NodejsFunction;
   /** C7 — the build-events handler. */
   readonly buildEventsFn: NodejsFunction;
+  /**
+   * The synth-failure step: closes out a run whose synth failed before the
+   * decider loop began (FAILED row, group slot released, synth check).
+   */
+  readonly synthFailureFn: NodejsFunction;
   /** The rule on the DEFAULT bus (CodeBuild emits there) feeding C7. */
   readonly buildEventsRule: events.Rule;
   /** C5 — the run executor state machine. */
@@ -134,6 +139,36 @@ export class RunExecutor extends Construct {
       }),
     );
 
+    this.synthFailureFn = new NodejsFunction(this, 'SynthFailureFn', {
+      description: `millwright (${name}) synth failure: marks the run FAILED and releases its group slot`,
+      entry: runtimeEntry('synth-failure'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        STATE_TABLE_NAME: props.stateTable.tableName,
+        METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),
+        // Group hand-off target, as for the decider: the pending run starts
+        // on this same machine.
+        RUN_EXECUTOR_ARN: this.stateMachineArn,
+      },
+      bundling: {
+        format: OutputFormat.CJS,
+        sourcesContent: false,
+        esbuildArgs: workspaceAliases(),
+      },
+    });
+    // Synth-failure role: the run row's terminal write, group-slot release
+    // and the synth check's desired state, plus the hand-off StartExecution.
+    props.stateTable.grantReadWriteData(this.synthFailureFn);
+    this.synthFailureFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['states:StartExecution'],
+        resources: [this.stateMachineArn],
+      }),
+    );
+
     this.stateMachine = new sfn.StateMachine(this, 'StateMachine', {
       stateMachineName: this.stateMachineName,
       stateMachineType: sfn.StateMachineType.STANDARD,
@@ -143,12 +178,14 @@ export class RunExecutor extends Construct {
             deciderFunctionArn: this.deciderFn.functionArn,
             synthFunctionArn,
             postSynthFunctionArn,
+            synthFailureFunctionArn: this.synthFailureFn.functionArn,
             stateMachineArn: this.stateMachineArn,
           }),
         ),
       ),
     });
     this.deciderFn.grantInvoke(this.stateMachine);
+    this.synthFailureFn.grantInvoke(this.stateMachine);
     this.stateMachine.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['lambda:InvokeFunction'],

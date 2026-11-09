@@ -5,6 +5,7 @@ const ARNS = {
   deciderFunctionArn: 'arn:aws:lambda:eu-west-1:123456789012:function:mw-decider',
   synthFunctionArn: 'arn:aws:lambda:eu-west-1:123456789012:function:mw-synth',
   postSynthFunctionArn: 'arn:aws:lambda:eu-west-1:123456789012:function:mw-post-synth',
+  synthFailureFunctionArn: 'arn:aws:lambda:eu-west-1:123456789012:function:mw-synth-failure',
   stateMachineArn: 'arn:aws:states:eu-west-1:123456789012:stateMachine:mw-run-executor',
 };
 
@@ -129,12 +130,47 @@ describe('run executor definition — synth phase', () => {
     expect(states().SynthOnlyComplete.Type).toBe('Succeed');
   });
 
-  it('any synth or validation failure lands in a visible Fail state', () => {
+  it('any synth or validation failure is caught into the synth-failure route, keeping the error', () => {
     const all = states();
     for (const state of [all.Synth, all.PostSynth]) {
-      expect(state.Catch.at(-1)).toMatchObject({ ErrorEquals: ['States.ALL'], Next: 'SynthFailed' });
+      expect(state.Catch.at(-1)).toEqual({
+        ErrorEquals: ['States.ALL'],
+        ResultPath: '$.synthError',
+        Next: 'RouteSynthFailure',
+      });
     }
     expect(all.SynthFailed.Type).toBe('Fail');
+  });
+
+  it('runs close out through the synth-failure step; bootstraps fail directly (issue #50)', () => {
+    const route = states().RouteSynthFailure;
+    expect(route.Type).toBe('Choice');
+    expect(route.Choices).toEqual([
+      {
+        And: [
+          { Variable: '$.action', IsPresent: true },
+          { Variable: '$.action', StringEquals: 'run' },
+        ],
+        Next: 'RecordSynthFailure',
+      },
+    ]);
+    expect(route.Default).toBe('SynthFailed');
+  });
+
+  it('the synth-failure step receives the input and caught error, then ALWAYS ends in SynthFailed', () => {
+    const record = states().RecordSynthFailure;
+    expect(record.Resource).toBe('arn:aws:states:::lambda:invoke');
+    expect(record.Parameters.FunctionName).toBe(ARNS.synthFailureFunctionArn);
+    expect(record.Parameters.Payload).toEqual({ 'input.$': '$', 'synthError.$': '$.synthError' });
+    expect(record.Next).toBe('SynthFailed');
+    // Its own failure must not hide the synth error: a distinct ResultPath,
+    // same terminal state. Transient and thrown errors retry first.
+    expect(record.Catch).toEqual([
+      { ErrorEquals: ['States.ALL'], ResultPath: '$.synthFailureError', Next: 'SynthFailed' },
+    ]);
+    expect(record.ResultPath).toBe('$.synthFailure');
+    expect(record.Retry[0].ErrorEquals).toContain('States.TaskFailed');
+    expect(record.Retry[0].ErrorEquals).not.toContain('States.ALL');
   });
 
   it('every named Next/Catch target exists', () => {

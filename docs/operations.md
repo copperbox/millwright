@@ -187,7 +187,7 @@ Local runs (`local-N`) never appear in `runs list` and never report checks.
 | `QUEUED` | Held in a concurrency group's pending slot, waiting for the running slot. |
 | `RUNNING` | The run executor is looping the decider. |
 | `SUCCEEDED` | Terminal. Every job either succeeded or was skipped by its own `skipIf` guard. |
-| `FAILED` | Terminal. At least one job is `FAILED` or `TIMED_OUT` — including the run-deadline path. |
+| `FAILED` | Terminal. At least one job is `FAILED` or `TIMED_OUT` — including the run-deadline path — or synth failed before any job could start. |
 | `CANCELLED` | Terminal. Cancellation was requested, or the run was superseded by a newer run in its concurrency group (`reason: superseded`). |
 
 Only the three terminal statuses can be the source of a rerun.
@@ -460,11 +460,20 @@ Symptoms and levers:
   `millwright runs cancel` is the clean exit.
 - **Repeated retries**: the per-job total-attempt cap is 3 by default. `attempts`
   on the job row tells you how many `StartBuild` claims it has consumed.
+- **A run that failed synth**: a `workflows.ts` that throws, or a model that
+  fails validation, ends the run `FAILED` with the cause in the
+  `<workflow> / synth` check; the execution ends in `SynthFailed`. The run
+  releases its concurrency-group slot on the way out, so the next queued run in
+  the group starts. Fix the definition and push again — `runs rerun` never
+  re-synths, so it cannot repair a synth failure.
 - **A `QUEUED` run whose group never freed**: the decider clears a group's
   running slot and starts the pending run on completion; the 1-minute sweep
-  repairs groups whose running run is terminal but whose slot never cleared. If
-  a run sits `QUEUED` for more than a couple of minutes, read the sweep Lambda's
-  logs. The sweep repairs slots — it does not resurrect dead executions.
+  repairs groups whose running run is terminal but whose slot never cleared,
+  and marks a `PENDING`/`RUNNING` occupant `FAILED` when its Step Functions
+  execution has already closed — nothing else would ever finish it. If a run
+  sits `QUEUED` for more than a couple of minutes, read the sweep Lambda's
+  logs. The sweep repairs slots and closes abandoned run rows — it does not
+  resurrect dead executions.
 
 ### Secrets not resolving
 

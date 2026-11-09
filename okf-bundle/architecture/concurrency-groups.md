@@ -32,15 +32,20 @@ A `GROUP#<key>` item holds the running and pending run ids. The launcher claims 
 pending slot with conditional/transactional writes — queued runs' records already exist at queue
 time, in QUEUED state.
 
-On run completion the decider clears the running slot and starts the pending run. Both the decider
-and the sweep hold `states:StartExecution`.
+On run completion the decider clears the running slot and starts the pending run. A run whose
+**synth fails** never reaches the decider: the run executor's `RecordSynthFailure` step marks it
+FAILED, releases its slot through the same shared `releaseGroupSlot`, and writes the failed synth
+check before the execution ends in `SynthFailed`. The decider, the synth-failure step and the
+sweep all hold `states:StartExecution`.
 
 **Crash safety**: the [sweep](../operations/degradation.md) detects groups whose running run is
-terminal but whose slot never cleared, and starts the pending run. The sweep repairs *slots*; it
-never resurrects executions.
+terminal but whose slot never cleared, and starts the pending run. It also treats a non-terminal
+occupant whose execution chain has closed as finished (marks it FAILED, then releases). The sweep
+repairs *slots*; it never resurrects executions.
 
 Code: `packages/millwright-cdk/src/runtime/shared/groups.ts`,
-`packages/millwright-cdk/src/runtime/sweep/`.
+`packages/millwright-cdk/src/runtime/sweep/`,
+`packages/millwright-cdk/src/runtime/synth-failure/`.
 
 # Citations
 

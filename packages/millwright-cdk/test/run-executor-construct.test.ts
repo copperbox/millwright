@@ -120,6 +120,39 @@ describe('run executor wiring (C5–C7)', () => {
     });
   });
 
+  it('gives the synth-failure step its table, the hand-off target, and lets the machine invoke it', () => {
+    const { template } = synth();
+    const machines = template.findResources('AWS::StepFunctions::StateMachine');
+    const definition = JSON.stringify(Object.values(machines)[0].Properties.DefinitionString);
+    expect(definition).toContain('RecordSynthFailure');
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Description: Match.stringLikeRegexp('synth failure'),
+      Timeout: 30,
+      Environment: {
+        Variables: Match.objectLike({
+          STATE_TABLE_NAME: Match.anyValue(),
+          METADATA_RETENTION_DAYS: '90',
+          RUN_EXECUTOR_ARN: Match.objectLike({
+            'Fn::Join': Match.arrayWith([
+              Match.arrayWith([Match.stringLikeRegexp(':stateMachine:ci-run-executor')]),
+            ]),
+          }),
+        }),
+      },
+    });
+    const synthFailureFn = Object.entries(template.findResources('AWS::Lambda::Function')).find(
+      ([, resource]: [string, any]) => /synth failure/.test(resource.Properties.Description),
+    )!;
+    // The machine's role may invoke it (alongside the pinned synth Lambdas).
+    const statements = Object.values(template.findResources('AWS::IAM::Policy')).flatMap(
+      (resource: any) => resource.Properties.PolicyDocument.Statement,
+    );
+    const invokes = statements
+      .filter((s: any) => s.Action === 'lambda:InvokeFunction')
+      .flatMap((s: any) => JSON.stringify(s.Resource));
+    expect(invokes.some((r: string) => r.includes(synthFailureFn[0]))).toBe(true);
+  });
+
   it('subscribes the build-events handler to this project on the DEFAULT bus', () => {
     const { template } = synth();
     template.hasResourceProperties('AWS::Events::Rule', {

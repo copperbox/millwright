@@ -10,8 +10,20 @@ import {
   runKey,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
+import {
+  ExecutionInspector,
+  ExecutionLiveness,
+  carryOverExecutionName,
+  runExecutionName,
+} from '../src/runtime/shared/executions';
 import { DynamoSweepStore } from '../src/runtime/sweep/store';
-import { SweepDeps, SweepStore, sweepGroups } from '../src/runtime/sweep/sweep';
+import {
+  MAX_CARRY_OVER_HOPS,
+  SweepDeps,
+  SweepStore,
+  runExecutionClosed,
+  sweepGroups,
+} from '../src/runtime/sweep/sweep';
 
 const NOW = Date.parse('2026-08-12T06:00:00Z');
 const SHA = 'a'.repeat(40);
@@ -60,6 +72,20 @@ class MemoryStore implements SweepStore {
     return run ? { ...run } : undefined;
   }
 
+  async finishRun(coords: RunCoordinates, status: RunStatus, nowMs: number): Promise<boolean> {
+    const key = runKey(coords);
+    const run = this.runs.get(key.pk + key.sk);
+    if (!run || !['PENDING', 'QUEUED', 'RUNNING'].includes(run.status)) {
+      return false;
+    }
+    this.runs.set(key.pk + key.sk, {
+      ...run,
+      status,
+      finishedAt: new Date(nowMs).toISOString(),
+    });
+    return true;
+  }
+
   async promotePending(
     group: string,
     expected: { running: string; pending: string },
@@ -94,11 +120,41 @@ class MemoryStore implements SweepStore {
   }
 }
 
-function harness(): { deps: SweepDeps; store: MemoryStore; started: string[] } {
+/**
+ * Scripted execution liveness by name; anything not scripted is 'running',
+ * so the pre-existing scenarios (live occupants) need no setup.
+ */
+class FakeExecutions implements ExecutionInspector {
+  readonly byName = new Map<string, ExecutionLiveness>();
+  readonly described: string[] = [];
+
+  set(name: string, liveness: ExecutionLiveness): void {
+    this.byName.set(name, liveness);
+  }
+
+  async describe(name: string): Promise<ExecutionLiveness> {
+    this.described.push(name);
+    return this.byName.get(name) ?? 'running';
+  }
+}
+
+function runRow(runId: string): RunItem {
+  const [repo, workflow, number] = runId.split('#');
+  return { repo, workflow, runNumber: Number(number) } as RunItem;
+}
+
+function harness(): {
+  deps: SweepDeps;
+  store: MemoryStore;
+  executions: FakeExecutions;
+  started: string[];
+} {
   const store = new MemoryStore();
+  const executions = new FakeExecutions();
   const started: string[] = [];
   const deps: SweepDeps = {
     store,
+    executions,
     starter: {
       startRun: async (run) => {
         started.push(formatRunId(run));
@@ -106,7 +162,7 @@ function harness(): { deps: SweepDeps; store: MemoryStore; started: string[] } {
     },
     log: () => {},
   };
-  return { deps, store, started };
+  return { deps, store, executions, started };
 }
 
 describe('group sweep repair (spec §8.4, C16)', () => {
@@ -185,6 +241,106 @@ describe('group sweep repair (spec §8.4, C16)', () => {
     expect(report).toMatchObject({ groups: 2, cleared: 1 });
   });
 });
+
+describe('group sweep — occupants whose execution closed without a terminal run (issue #50)', () => {
+  it('fails and releases a PENDING occupant whose execution closed, starting the queued waiter', async () => {
+    const { deps, store, executions, started } = harness();
+    // A synth failure from before the synth-failure step existed: the
+    // execution ended in SynthFailed and the run row never moved.
+    store.putRun(RUNNING_ID, 'PENDING');
+    store.putRun(PENDING_ID, 'QUEUED');
+    store.groups.set('deploy-main', { running: RUNNING_ID, pending: PENDING_ID });
+    executions.set(runExecutionName(runRow(RUNNING_ID)), 'closed');
+    executions.set(carryOverExecutionName(runExecutionName(runRow(RUNNING_ID))), 'missing');
+
+    const report = await sweepGroups(deps, NOW);
+
+    expect(store.runs.get(runKeyOf(RUNNING_ID))).toMatchObject({
+      status: 'FAILED',
+      finishedAt: new Date(NOW).toISOString(),
+    });
+    expect(started).toEqual([PENDING_ID]);
+    expect(store.groups.get('deploy-main')).toEqual({ running: PENDING_ID });
+    expect(report).toMatchObject({ groups: 1, failed: 1, handedOff: 1, healthy: 0 });
+  });
+
+  it('clears the slot of a RUNNING occupant whose whole carry-over chain has closed', async () => {
+    const { deps, store, executions, started } = harness();
+    store.putRun(RUNNING_ID, 'RUNNING');
+    store.groups.set('deploy-main', { running: RUNNING_ID });
+    const first = runExecutionName(runRow(RUNNING_ID));
+    const second = carryOverExecutionName(first);
+    executions.set(first, 'closed');
+    executions.set(second, 'closed');
+    executions.set(carryOverExecutionName(second), 'missing');
+
+    const report = await sweepGroups(deps, NOW);
+
+    expect(store.runs.get(runKeyOf(RUNNING_ID))?.status).toBe('FAILED');
+    expect(started).toEqual([]);
+    expect(store.groups.get('deploy-main')).toEqual({});
+    expect(report).toMatchObject({ failed: 1, cleared: 1 });
+  });
+
+  it('leaves a RUNNING occupant alone when its carry-over successor is still running', async () => {
+    const { deps, store, executions } = harness();
+    store.putRun(RUNNING_ID, 'RUNNING');
+    store.groups.set('deploy-main', { running: RUNNING_ID });
+    const first = runExecutionName(runRow(RUNNING_ID));
+    executions.set(first, 'closed');
+    executions.set(carryOverExecutionName(first), 'running');
+
+    const report = await sweepGroups(deps, NOW);
+
+    expect(store.runs.get(runKeyOf(RUNNING_ID))?.status).toBe('RUNNING');
+    expect(store.groups.get('deploy-main')).toEqual({ running: RUNNING_ID });
+    expect(report).toMatchObject({ healthy: 1, failed: 0 });
+  });
+
+  it('leaves a PENDING occupant alone when the launcher has not started its execution yet', async () => {
+    const { deps, store, executions } = harness();
+    // Slot claimed, StartExecution not yet landed: the race is live, not stuck.
+    store.putRun(RUNNING_ID, 'PENDING');
+    store.groups.set('deploy-main', { running: RUNNING_ID });
+    executions.set(runExecutionName(runRow(RUNNING_ID)), 'missing');
+
+    const report = await sweepGroups(deps, NOW);
+
+    expect(store.runs.get(runKeyOf(RUNNING_ID))?.status).toBe('PENDING');
+    expect(store.groups.get('deploy-main')).toEqual({ running: RUNNING_ID });
+    expect(report).toMatchObject({ healthy: 1, failed: 0 });
+  });
+
+  it('describes only the first execution of a live run', async () => {
+    const { deps, store, executions } = harness();
+    store.putRun(RUNNING_ID, 'RUNNING');
+    store.groups.set('deploy-main', { running: RUNNING_ID });
+    await sweepGroups(deps, NOW);
+    expect(executions.described).toEqual([runExecutionName(runRow(RUNNING_ID))]);
+  });
+
+  it('terminal occupants are released without consulting Step Functions', async () => {
+    const { deps, store, executions } = harness();
+    store.putRun(RUNNING_ID, 'SUCCEEDED');
+    store.groups.set('deploy-main', { running: RUNNING_ID });
+    await sweepGroups(deps, NOW);
+    expect(executions.described).toEqual([]);
+    expect(store.groups.get('deploy-main')).toEqual({});
+  });
+
+  it('runExecutionClosed gives up on an implausibly long chain and calls the run live', async () => {
+    const executions = new FakeExecutions();
+    executions.describe = async () => 'closed';
+    expect(await runExecutionClosed(executions, runRow(RUNNING_ID))).toBe(false);
+    expect(MAX_CARRY_OVER_HOPS).toBeGreaterThan(3);
+  });
+});
+
+function runKeyOf(runId: string): string {
+  const [repo, workflow, number] = runId.split('#');
+  const key = runKey({ repo, workflow, runNumber: Number(number) });
+  return key.pk + key.sk;
+}
 
 describe('DynamoSweepStore.listGroups', () => {
   it('scans GROUP# rows across pagination', async () => {

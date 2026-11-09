@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { Duration } from 'aws-cdk-lib';
+import { Aws, Duration } from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
@@ -24,7 +24,11 @@ export interface SweepProps {
  * detects concurrency groups whose running run is terminal but whose slot
  * never cleared — a decider that died between run completion and its release
  * — and re-runs the shared release convergence: start the pending run, hand
- * the slot over. It repairs group slots; it never resurrects executions.
+ * the slot over. It repairs group slots; it never resurrects executions. A
+ * non-terminal occupant whose execution has already closed (a synth failure
+ * from before the synth-failure step existed, a decider dead past its retry
+ * budget) is marked FAILED and released the same way, which takes
+ * `states:DescribeExecution` on the machine's executions.
  *
  * Overlapping ticks are safe (every repair write is conditional), so the
  * schedule needs no concurrency cap.
@@ -65,6 +69,17 @@ export class Sweep extends Construct {
       new iam.PolicyStatement({
         actions: ['states:StartExecution'],
         resources: [props.runExecutorArn],
+      }),
+    );
+    // Occupant liveness: DescribeExecution on the run executor's executions.
+    // Execution ARNs are spelled from the launcher-pinned machine name — the
+    // state machine ARN prop is a deploy-time token that cannot be re-cut.
+    this.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['states:DescribeExecution'],
+        resources: [
+          `arn:${Aws.PARTITION}:states:${Aws.REGION}:${Aws.ACCOUNT_ID}:execution:${name}-run-executor:*`,
+        ],
       }),
     );
 

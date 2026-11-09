@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   BuildOutcome,
   DeciderJobState,
@@ -16,6 +15,7 @@ import {
   parseRunId,
   workflowFromModel,
 } from '@copperbox/millwright-state';
+import { carryOverExecutionName } from '../shared/executions';
 import { GroupSlotStore, PendingRunStarter, releaseGroupSlot } from '../shared/groups';
 import { JobProjectionPatch } from '../shared/jobs';
 
@@ -172,15 +172,8 @@ export interface CarryOverInput {
   readonly runNumber: number;
 }
 
-/**
- * Deterministic, chainable carry-over execution name: each generation hashes
- * its predecessor's name, so retries within one execution reuse the same
- * name (idempotent under ExecutionAlreadyExists) while successive
- * generations never collide.
- */
-export function carryOverExecutionName(currentExecutionName: string): string {
-  return `co-${createHash('sha256').update(currentExecutionName).digest('hex').slice(0, 40)}`;
-}
+/** The carry-over name chain lives with the shared execution naming. */
+export { carryOverExecutionName };
 
 /** Display projection for a build snapshot; FAULTs are left to the decider. */
 export function projectionStatus(snapshot: BuildSnapshot): JobStatus | undefined {
