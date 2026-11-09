@@ -1,6 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { sendDesiredCheckUpsert, unownedDesiredCheckUpsert } from '../shared/checks';
 import { PostSynthEvent, PostSynthResult, completePostSynth } from './post-synth';
 
 /**
@@ -25,11 +26,12 @@ function required(name: string): string {
 export async function handler(event: PostSynthEvent): Promise<PostSynthResult> {
   const bucket = required('ARTIFACT_BUCKET_NAME');
   const tableName = required('STATE_TABLE_NAME');
+  const metadataRetentionDays = Number(required('METADATA_RETENTION_DAYS'));
   return completePostSynth(
     {
       config: {
         schemaCeiling: Number(required('SCHEMA_CEILING')),
-        metadataRetentionDays: Number(required('METADATA_RETENTION_DAYS')),
+        metadataRetentionDays,
       },
       readObject: async (key) => {
         try {
@@ -46,8 +48,14 @@ export async function handler(event: PostSynthEvent): Promise<PostSynthResult> {
         putRegistry: async (item) => {
           await documentClient.send(new PutCommand({ TableName: tableName, Item: item }));
         },
-        putCheckState: async (item) => {
-          await documentClient.send(new PutCommand({ TableName: tableName, Item: item }));
+        putDesiredCheck: (write, nowMs) =>
+          sendDesiredCheckUpsert(documentClient, tableName, write, nowMs, metadataRetentionDays),
+        putBootstrapCheck: async (write, nowMs) => {
+          await documentClient.send(
+            new UpdateCommand(
+              unownedDesiredCheckUpsert(tableName, write, nowMs, metadataRetentionDays),
+            ),
+          );
         },
       },
       now: () => Date.now(),

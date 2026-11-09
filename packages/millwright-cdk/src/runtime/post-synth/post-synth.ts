@@ -1,14 +1,20 @@
 import {
-  CheckStateItem,
+  BOOTSTRAP_SYNTH_CONTEXT,
+  DesiredCheckState,
   RegistryItem,
   RegistryWorkflowEntry,
-  checkStateKey,
+  desiredBootstrapSynthFailed,
+  desiredBootstrapSynthSucceeded,
+  desiredSynthFailed,
+  desiredSynthSucceeded,
   registryKey,
-  withMetadataTtl,
+  synthCheckContext as workflowSynthCheckContext,
 } from '@copperbox/millwright-state';
 import { RunModel, validateRunModel } from '@copperbox/millwright-workflows';
+import { DesiredCheckWrite, UnownedDesiredCheckWrite } from '../shared/checks';
 import {
   ExecutionInput,
+  RunExecutionInput,
   parseExecutionInput,
 } from '../shared/execution-input';
 import { synthDestinationPrefix } from '../shared/synth-locations';
@@ -23,6 +29,10 @@ import { synthDestinationPrefix } from '../shared/synth-locations';
  * the EXECUTION's identity (repo/ref/sha from the launcher), never by
  * anything the model claims — a lying model is rejected, not re-keyed.
  *
+ * It also completes the synth check (spec §13.2 lifecycle): the launcher
+ * created `<workflow> / synth` as `in_progress` at run start; this step
+ * writes its conclusion as a desired state the reporter posts to GitHub.
+ *
  * Job-role policy reconciliation for `secretsAllowedRefs`-matched refs
  * (§10.2) also belongs to this step; it lands with the IAM issue and plugs
  * in after validation, before the registry write.
@@ -31,7 +41,7 @@ import { synthDestinationPrefix } from '../shared/synth-locations';
 export const MODEL_OBJECT_NAME = 'model.json';
 
 /** Bootstrap executions report the repo-level context (spec §B2). */
-export const BOOTSTRAP_SYNTH_CHECK_CONTEXT = 'millwright / synth';
+export const BOOTSTRAP_SYNTH_CHECK_CONTEXT = BOOTSTRAP_SYNTH_CONTEXT;
 
 export class PostSynthError extends Error {}
 
@@ -40,19 +50,13 @@ export interface PostSynthEvent {
   readonly input: unknown;
 }
 
-/**
- * What the synth check should show, serialized into the check row's
- * `desired` attribute. The reporter (its own issue) renders it to GitHub.
- */
-export interface SynthCheckDesired {
-  readonly conclusion: 'success' | 'failure';
-  readonly summary: string;
-}
-
 export interface PostSynthStore {
   /** Plain put — the registry is refreshed by every successful synth. */
   putRegistry(item: RegistryItem): Promise<void>;
-  putCheckState(item: CheckStateItem): Promise<void>;
+  /** A run's synth check: the §13.2 ownership upsert; false when a newer run owns the context. */
+  putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean>;
+  /** The bootstrap `millwright / synth` check: unowned upsert, single writer per sha. */
+  putBootstrapCheck(write: UnownedDesiredCheckWrite, nowMs: number): Promise<void>;
 }
 
 export interface PostSynthDeps {
@@ -78,7 +82,12 @@ export interface PostSynthResult {
 export function synthCheckContext(input: ExecutionInput): string {
   return input.action === 'synth-only'
     ? BOOTSTRAP_SYNTH_CHECK_CONTEXT
-    : `${input.workflow} / synth`;
+    : workflowSynthCheckContext(input.workflow);
+}
+
+/** The run id as the CLI displays it — the check owner and summary label. */
+export function runCheckLabel(input: RunExecutionInput): string {
+  return `${input.workflow}#${input.runNumber}`;
 }
 
 export async function completePostSynth(
@@ -89,10 +98,7 @@ export async function completePostSynth(
   try {
     const model = await readValidatedModel(deps, input);
     await writeRegistryEntry(deps, input, model);
-    await writeCheckState(deps, input, {
-      conclusion: 'success',
-      summary: `synthesized ${model.workflows.length} workflow(s) at ${input.sha.slice(0, 12)}`,
-    });
+    await writeSynthCheck(deps, input, synthSucceeded(input, model));
     return {
       schemaVersion: model.schemaVersion,
       workflows: model.workflows.map((wf) => wf.name),
@@ -104,7 +110,7 @@ export async function completePostSynth(
     // an invalid model must be a visible failure, not a silent one. A failed
     // check write must not mask the original error.
     try {
-      await writeCheckState(deps, input, { conclusion: 'failure', summary: message });
+      await writeSynthCheck(deps, input, synthFailed(input, message));
     } catch (checkErr) {
       deps.log('could not record the synth check failure', { error: String(checkErr) });
     }
@@ -193,29 +199,63 @@ async function writeRegistryEntry(
 }
 
 /**
- * Synth check desired state. Runs get the workflow-scoped `<wf> / synth`
- * context owned by their run id; bootstraps report `millwright / synth`,
- * which has a single writer per sha (the idempotent bootstrap execution)
- * and needs no ordering rule (spec §B2). Rerun never re-synths, so one
- * (repo, sha, context) normally sees exactly one writer.
+ * Success content: a run's check counts the job checks the decider is about
+ * to create for ITS workflow; a bootstrap's counts the workflows registered.
+ * A run whose workflow vanished from the model still gets a success here —
+ * the decider reports that as the run's failure, not synth's.
  */
-async function writeCheckState(
+function synthSucceeded(input: ExecutionInput, model: RunModel): DesiredCheckState {
+  if (input.action === 'synth-only') {
+    return desiredBootstrapSynthSucceeded(input.sha, model.workflows.length);
+  }
+  const jobs = model.workflows.find((wf) => wf.name === input.workflow)?.jobs.length ?? 0;
+  return desiredSynthSucceeded(runCheckLabel(input), jobs);
+}
+
+function synthFailed(input: ExecutionInput, message: string): DesiredCheckState {
+  return input.action === 'synth-only'
+    ? desiredBootstrapSynthFailed(input.sha, message)
+    : desiredSynthFailed(runCheckLabel(input), message);
+}
+
+/**
+ * Synth check desired state. Runs get the workflow-scoped `<wf> / synth`
+ * context owned by their run id — the same (repo, sha, context, owner) the
+ * launcher wrote `in_progress` under, so this completes that check run
+ * instead of minting another; a newer run owning the context drops the write
+ * silently. Bootstraps report `millwright / synth`, which has a single
+ * writer per sha (the idempotent bootstrap execution) and needs no ordering
+ * rule (spec §B2). Rerun never re-synths, so one (repo, sha, context)
+ * normally sees exactly one completing writer.
+ */
+async function writeSynthCheck(
   deps: PostSynthDeps,
   input: ExecutionInput,
-  desired: SynthCheckDesired,
+  desired: DesiredCheckState,
 ): Promise<void> {
   const context = synthCheckContext(input);
-  const item: CheckStateItem = withMetadataTtl(
+  if (input.action === 'synth-only') {
+    await deps.store.putBootstrapCheck(
+      { repo: input.repo, sha: input.sha, context, desired },
+      deps.now(),
+    );
+    return;
+  }
+  const written = await deps.store.putDesiredCheck(
     {
-      ...checkStateKey(input.repo, input.sha, context),
       repo: input.repo,
       sha: input.sha,
       context,
-      desired: JSON.stringify(desired),
-      ...(input.action === 'run' ? { ownerRun: input.runId } : {}),
+      ownerRun: runCheckLabel(input),
+      ownerRunNumber: input.runNumber,
+      desired,
     },
     deps.now(),
-    deps.config.metadataRetentionDays,
   );
-  await deps.store.putCheckState(item);
+  if (!written) {
+    deps.log('synth check owned by a newer run; not updated', {
+      runId: input.runId,
+      context,
+    });
+  }
 }

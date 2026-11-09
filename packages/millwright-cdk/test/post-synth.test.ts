@@ -1,12 +1,19 @@
 import {
-  CheckStateItem,
   RegistryItem,
   TTL_ATTRIBUTE,
   checkStateKey,
+  parseDesiredCheckState,
   registryKey,
+  serializeDesiredCheckState,
 } from '@copperbox/millwright-state';
 import { Trigger, Workflow, WorkflowSet, synthesize } from '@copperbox/millwright-workflows';
 import { describe, expect, it } from 'vitest';
+import {
+  DesiredCheckWrite,
+  UnownedDesiredCheckWrite,
+  desiredCheckUpsert,
+  unownedDesiredCheckUpsert,
+} from '../src/runtime/shared/checks';
 import {
   BOOTSTRAP_SYNTH_CHECK_CONTEXT,
   PostSynthDeps,
@@ -26,6 +33,7 @@ function modelJson(overrides: { repo?: string; commit?: string } = {}): string {
     image: 'public.ecr.aws/docker/library/node:22',
   });
   ci.job('build', { steps: ['npm ci', 'npm test'] });
+  ci.job('lint', { steps: ['npm run lint'] });
   const { model } = synthesize(app, {
     repo: overrides.repo ?? 'octocat/app',
     commit: overrides.commit ?? SHA,
@@ -54,36 +62,57 @@ const BOOTSTRAP_INPUT = {
 interface Harness {
   deps: PostSynthDeps;
   registryPuts: RegistryItem[];
-  checkPuts: CheckStateItem[];
+  checkWrites: { write: DesiredCheckWrite; nowMs: number }[];
+  bootstrapWrites: { write: UnownedDesiredCheckWrite; nowMs: number }[];
   reads: string[];
+  /** Simulates a newer run owning the context: the ownership upsert drops. */
+  ownedByNewerRun: boolean;
 }
 
 function harness(objects: Record<string, string>): Harness {
-  const registryPuts: RegistryItem[] = [];
-  const checkPuts: CheckStateItem[] = [];
-  const reads: string[] = [];
-  return {
-    registryPuts,
-    checkPuts,
-    reads,
+  const h: Harness = {
+    registryPuts: [],
+    checkWrites: [],
+    bootstrapWrites: [],
+    reads: [],
+    ownedByNewerRun: false,
     deps: {
       config: { schemaCeiling: 1, metadataRetentionDays: 90 },
       readObject: async (key: string) => {
-        reads.push(key);
+        h.reads.push(key);
         return objects[key];
       },
       store: {
         putRegistry: async (item: RegistryItem) => {
-          registryPuts.push(item);
+          h.registryPuts.push(item);
         },
-        putCheckState: async (item: CheckStateItem) => {
-          checkPuts.push(item);
+        putDesiredCheck: async (write, nowMs) => {
+          h.checkWrites.push({ write, nowMs });
+          return !h.ownedByNewerRun;
+        },
+        putBootstrapCheck: async (write, nowMs) => {
+          h.bootstrapWrites.push({ write, nowMs });
         },
       },
       now: () => NOW_MS,
       log: () => {},
     },
   };
+  return h;
+}
+
+/**
+ * The reporter's exact read path: the serialization the store would write
+ * (`desiredCheckUpsert` / `unownedDesiredCheckUpsert`), parsed back with
+ * `parseDesiredCheckState`. A state that does not survive this never posts.
+ */
+function reporterReads(write: DesiredCheckWrite | UnownedDesiredCheckWrite) {
+  const input =
+    'ownerRunNumber' in write
+      ? desiredCheckUpsert('table', write, NOW_MS, 90)
+      : unownedDesiredCheckUpsert('table', write, NOW_MS, 90);
+  const stored = input.ExpressionAttributeValues![':desired'] as string;
+  return parseDesiredCheckState(stored);
 }
 
 describe('synthCheckContext', () => {
@@ -116,29 +145,18 @@ describe('completePostSynth — the control-plane side of the trust boundary', (
     expect(result.workflows).toEqual(['ci']);
   });
 
-  it('reports the workflow-scoped synth check as successful, owned by the run', async () => {
-    const h = harness({ 'runs/octocat/app/ci/7/in/model.json': modelJson() });
-    await completePostSynth(h.deps, { input: RUN_INPUT });
-
-    expect(h.checkPuts).toHaveLength(1);
-    const check = h.checkPuts[0];
-    expect({ pk: check.pk, sk: check.sk }).toEqual(
-      checkStateKey('octocat/app', SHA, 'ci / synth'),
-    );
-    expect(check.context).toBe('ci / synth');
-    expect(check.ownerRun).toBe('octocat/app#ci#7');
-    expect(JSON.parse(check.desired!)).toMatchObject({ conclusion: 'success' });
-    expect(check.expiresAt).toBeGreaterThan(NOW_MS / 1000);
-  });
-
   it('bootstrap executions read the sha-keyed prefix and report millwright / synth with no owner run', async () => {
     const h = harness({ [`runs/octocat/app/.synth/${SHA}/in/model.json`]: modelJson() });
     await completePostSynth(h.deps, { input: BOOTSTRAP_INPUT });
 
     expect(h.reads).toEqual([`runs/octocat/app/.synth/${SHA}/in/model.json`]);
     expect(h.registryPuts).toHaveLength(1);
-    expect(h.checkPuts[0].context).toBe('millwright / synth');
-    expect(h.checkPuts[0].ownerRun).toBeUndefined();
+    expect(h.checkWrites).toEqual([]);
+    expect(h.bootstrapWrites).toHaveLength(1);
+    const { write, nowMs } = h.bootstrapWrites[0];
+    expect(write).toMatchObject({ repo: 'octocat/app', sha: SHA, context: 'millwright / synth' });
+    expect('ownerRun' in write).toBe(false);
+    expect(nowMs).toBe(NOW_MS);
   });
 
   it('is idempotent: identical inputs produce identical writes', async () => {
@@ -147,19 +165,10 @@ describe('completePostSynth — the control-plane side of the trust boundary', (
     await completePostSynth(first.deps, { input: BOOTSTRAP_INPUT });
     await completePostSynth(second.deps, { input: BOOTSTRAP_INPUT });
     expect(first.registryPuts).toEqual(second.registryPuts);
-    expect(first.checkPuts).toEqual(second.checkPuts);
-  });
-
-  it('a missing model fails the step and reports the failure in the synth check', async () => {
-    const h = harness({});
-    await expect(completePostSynth(h.deps, { input: RUN_INPUT })).rejects.toThrowError(
-      PostSynthError,
+    expect(first.bootstrapWrites).toEqual(second.bootstrapWrites);
+    expect(serializeDesiredCheckState(first.bootstrapWrites[0].write.desired)).toBe(
+      serializeDesiredCheckState(second.bootstrapWrites[0].write.desired),
     );
-    expect(h.registryPuts).toHaveLength(0);
-    expect(h.checkPuts).toHaveLength(1);
-    const desired = JSON.parse(h.checkPuts[0].desired!);
-    expect(desired.conclusion).toBe('failure');
-    expect(desired.summary).toMatch(/model\.json/);
   });
 
   it('schema-invalid models never reach the registry, and the error is surfaced', async () => {
@@ -170,7 +179,10 @@ describe('completePostSynth — the control-plane side of the trust boundary', (
       PostSynthError,
     );
     expect(h.registryPuts).toHaveLength(0);
-    expect(JSON.parse(h.checkPuts[0].desired!).conclusion).toBe('failure');
+    expect(h.checkWrites[0].write.desired).toMatchObject({
+      status: 'completed',
+      conclusion: 'failure',
+    });
   });
 
   it('rejects a model whose schemaVersion is newer than the control plane supports', async () => {
@@ -202,5 +214,87 @@ describe('completePostSynth — the control-plane side of the trust boundary', (
       PostSynthError,
     );
     expect(h.registryPuts).toHaveLength(0);
+  });
+});
+
+describe('completePostSynth — the synth check (spec §13.2 lifecycle)', () => {
+  it('completes the workflow-scoped synth check as a success owned by the run, counting its job checks', async () => {
+    const h = harness({ 'runs/octocat/app/ci/7/in/model.json': modelJson() });
+    await completePostSynth(h.deps, { input: RUN_INPUT });
+
+    expect(h.bootstrapWrites).toEqual([]);
+    expect(h.checkWrites).toHaveLength(1);
+    const { write, nowMs } = h.checkWrites[0];
+    expect(write).toMatchObject({
+      repo: 'octocat/app',
+      sha: SHA,
+      context: 'ci / synth',
+      ownerRun: 'ci#7',
+      ownerRunNumber: 7,
+    });
+    expect(nowMs).toBe(NOW_MS);
+    // The same item the launcher wrote `in_progress` under at run start.
+    expect(desiredCheckUpsert('table', write, NOW_MS, 90).Key).toEqual(
+      checkStateKey('octocat/app', SHA, 'ci / synth'),
+    );
+
+    const desired = reporterReads(write);
+    expect(desired).toMatchObject({ status: 'completed', conclusion: 'success' });
+    expect(desired.title).not.toBe('');
+    expect(desired.summary).toContain('ci#7');
+    expect(desired.summary).toContain('2 job check(s)');
+  });
+
+  it('a missing model fails the step and the failure, with its reason, survives the reporter read path', async () => {
+    const h = harness({});
+    await expect(completePostSynth(h.deps, { input: RUN_INPUT })).rejects.toThrowError(
+      PostSynthError,
+    );
+    expect(h.registryPuts).toHaveLength(0);
+    expect(h.checkWrites).toHaveLength(1);
+    const desired = reporterReads(h.checkWrites[0].write);
+    expect(desired).toMatchObject({ status: 'completed', conclusion: 'failure' });
+    expect(desired.summary).toMatch(/model\.json/);
+    expect(desired.summary).toContain('ci#7');
+  });
+
+  it('bootstrap outcomes survive the reporter read path too, naming the sha', async () => {
+    const ok = harness({ [`runs/octocat/app/.synth/${SHA}/in/model.json`]: modelJson() });
+    await completePostSynth(ok.deps, { input: BOOTSTRAP_INPUT });
+    const succeeded = reporterReads(ok.bootstrapWrites[0].write);
+    expect(succeeded).toMatchObject({ status: 'completed', conclusion: 'success' });
+    expect(succeeded.summary).toContain(SHA.slice(0, 12));
+
+    const broken = harness({
+      [`runs/octocat/app/.synth/${SHA}/in/model.json`]: JSON.stringify({ schemaVersion: 1 }),
+    });
+    await expect(completePostSynth(broken.deps, { input: BOOTSTRAP_INPUT })).rejects.toThrow();
+    const failed = reporterReads(broken.bootstrapWrites[0].write);
+    expect(failed).toMatchObject({ status: 'completed', conclusion: 'failure' });
+    expect(failed.summary).toMatch(/Invalid run model/);
+  });
+
+  it('a synth check owned by a newer run is dropped without failing the step', async () => {
+    const h = harness({ 'runs/octocat/app/ci/7/in/model.json': modelJson() });
+    h.ownedByNewerRun = true;
+    const logged: string[] = [];
+    h.deps = { ...h.deps, log: (message) => logged.push(message) };
+    await expect(completePostSynth(h.deps, { input: RUN_INPUT })).resolves.toBeDefined();
+    expect(h.registryPuts).toHaveLength(1);
+    expect(logged).toContain('synth check owned by a newer run; not updated');
+  });
+
+  it('a check write failure never masks the original synth error', async () => {
+    const h = harness({});
+    h.deps = {
+      ...h.deps,
+      store: {
+        ...h.deps.store,
+        putDesiredCheck: async () => {
+          throw new Error('table unavailable');
+        },
+      },
+    };
+    await expect(completePostSynth(h.deps, { input: RUN_INPUT })).rejects.toThrow(/model\.json/);
   });
 });

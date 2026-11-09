@@ -1,10 +1,15 @@
 import {
   checkStateKey,
+  desiredBootstrapSynthSucceeded,
   desiredSynthStarted,
   serializeDesiredCheckState,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
-import { desiredCheckUpsert, isConditionalCheckFailure } from '../src/runtime/shared/checks';
+import {
+  desiredCheckUpsert,
+  isConditionalCheckFailure,
+  unownedDesiredCheckUpsert,
+} from '../src/runtime/shared/checks';
 
 const NOW = Date.parse('2026-08-12T06:00:00Z');
 const SHA = 'a'.repeat(40);
@@ -68,5 +73,32 @@ describe('isConditionalCheckFailure', () => {
     ).toBe(true);
     expect(isConditionalCheckFailure(new Error('boom'))).toBe(false);
     expect(isConditionalCheckFailure(undefined)).toBe(false);
+  });
+});
+
+describe('unownedDesiredCheckUpsert (the bootstrap millwright / synth context, spec §B2)', () => {
+  const bootstrap = {
+    repo: 'octocat/app',
+    sha: SHA,
+    context: 'millwright / synth',
+    desired: desiredBootstrapSynthSucceeded(SHA, 2),
+  };
+
+  it('targets the same CHECK#/CTX# item shape with no owner and no condition', () => {
+    const input = unownedDesiredCheckUpsert('table', bootstrap, NOW, 90);
+    expect(input.Key).toEqual(checkStateKey('octocat/app', SHA, 'millwright / synth'));
+    expect(input.ConditionExpression).toBeUndefined();
+    expect(input.UpdateExpression).not.toMatch(/ownerRun/);
+    expect(input.ExpressionAttributeValues![':desired']).toBe(
+      serializeDesiredCheckState(bootstrap.desired),
+    );
+    expect(input.ExpressionAttributeValues![':desiredAt']).toBe(new Date(NOW).toISOString());
+  });
+
+  it('is an update, not a put: checkRunId and reported survive a re-executed bootstrap', () => {
+    const input = unownedDesiredCheckUpsert('table', bootstrap, NOW, 90);
+    expect(input.UpdateExpression).not.toMatch(/checkRunId/);
+    expect(input.UpdateExpression).not.toMatch(/reported/);
+    expect(input.UpdateExpression).toMatch(/REMOVE .*abandoned/);
   });
 });

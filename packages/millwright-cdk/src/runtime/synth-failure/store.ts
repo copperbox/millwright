@@ -1,6 +1,5 @@
 import { RunCoordinates, RunItem } from '@copperbox/millwright-state';
-import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { DesiredCheckWrite, desiredCheckUpsert, isConditionalCheckFailure } from '../shared/checks';
+import { DesiredCheckWrite, sendDesiredCheckUpsert } from '../shared/checks';
 import { DynamoGroupSlotStore } from '../shared/groups';
 import { finishRunConditionally } from '../shared/runs';
 import { SynthFailureStore } from './synth-failure';
@@ -21,18 +20,12 @@ export class DynamoSynthFailureStore extends DynamoGroupSlotStore implements Syn
   }
 
   async putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean> {
-    try {
-      await this.client.send(
-        new UpdateCommand(
-          desiredCheckUpsert(this.tableName, write, nowMs, this.metadataRetentionDays),
-        ),
-      );
-      return true;
-    } catch (err) {
-      if (isConditionalCheckFailure(err)) {
-        return false;
-      }
-      throw err;
-    }
+    return sendDesiredCheckUpsert(
+      this.client,
+      this.tableName,
+      write,
+      nowMs,
+      this.metadataRetentionDays,
+    );
   }
 }

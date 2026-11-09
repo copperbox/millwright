@@ -11,10 +11,13 @@ import {
   eventDedupeKey,
   formatRunId,
   jobKey,
+  parseDesiredCheckState,
   registryKey,
   runKey,
+  serializeDesiredCheckState,
 } from '@copperbox/millwright-state';
 import { describe, expect, it } from 'vitest';
+import { DesiredCheckWrite } from '../src/runtime/shared/checks';
 import {
   ArtifactCopier,
   BusEventEnvelope,
@@ -39,6 +42,17 @@ class MemoryStore implements LauncherStore {
   readonly runs = new Map<string, RunItem>();
   readonly jobs = new Map<string, JobItem[]>();
   readonly groups = new Map<string, { running?: string; pending?: string }>();
+  readonly checks: { write: DesiredCheckWrite; nowMs: number }[] = [];
+  failNextCheckWrite = false;
+
+  async putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean> {
+    if (this.failNextCheckWrite) {
+      this.failNextCheckWrite = false;
+      throw new Error('injected check-table error');
+    }
+    this.checks.push({ write, nowMs });
+    return true;
+  }
 
   putRun(coords: RunCoordinates, overrides: Partial<RunItem> = {}): void {
     const key = runKey(coords);
@@ -750,5 +764,93 @@ describe('rerun (spec §7.7)', () => {
     const result = await processBusEvent(deps, rerunEvent(), NOW);
     expect(result).toMatchObject({ outcome: 'rejected' });
     expect(starter.startedRuns).toEqual([]);
+  });
+});
+
+describe('synth check at run start (spec §13.2 lifecycle)', () => {
+  const GATED = {
+    deploy: {
+      triggers: [{ kind: 'push' }],
+      concurrency: { group: 'deploy-${ref}', policy: 'queue' },
+    },
+  };
+
+  it('opens <workflow> / synth in_progress, owned by the run, before starting the execution', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    await processBusEvent(deps, pushEvent(), NOW);
+
+    expect(store.checks).toHaveLength(1);
+    const { write, nowMs } = store.checks[0];
+    expect(write).toMatchObject({
+      repo: 'octocat/app',
+      sha: SHA,
+      context: 'ci / synth',
+      ownerRun: 'ci#1',
+      ownerRunNumber: 1,
+    });
+    expect(nowMs).toBe(NOW);
+    // The reporter's read path accepts exactly what was written.
+    const desired = parseDesiredCheckState(serializeDesiredCheckState(write.desired));
+    expect(desired.status).toBe('in_progress');
+    expect(desired.conclusion).toBeUndefined();
+    expect(desired.summary).toContain('ci#1');
+    expect(starter.startedRuns).toEqual(['octocat/app#ci#1']);
+  });
+
+  it('opens the check for queued runs too — their synth is only waiting on the group', async () => {
+    const { deps, store } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', GATED);
+    await processBusEvent(deps, pushEvent(), NOW);
+    await processBusEvent(deps, pushEvent({ sha: 'd'.repeat(40) }), NOW + 1000);
+
+    expect(store.checks.map((c) => [c.write.sha, c.write.ownerRun, c.write.desired.status])).toEqual([
+      [SHA, 'deploy#1', 'in_progress'],
+      ['d'.repeat(40), 'deploy#2', 'in_progress'],
+    ]);
+  });
+
+  it('a redelivery re-writes the identical desired state — convergence is a no-op for the reporter', async () => {
+    const { deps, store } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    await processBusEvent(deps, pushEvent(), NOW);
+    await processBusEvent(deps, pushEvent(), NOW + 1000);
+    const serialized = store.checks.map((c) => serializeDesiredCheckState(c.write.desired));
+    expect(new Set(serialized).size).toBe(1);
+    expect(store.checks.every((c) => c.write.ownerRun === 'ci#1')).toBe(true);
+  });
+
+  it('never reopens the check for a rerun — reruns skip synth on an already-reported sha', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    store.putRun({ repo: 'octocat/app', workflow: 'ci', runNumber: 41 }, { status: 'FAILED' });
+    await processBusEvent(
+      deps,
+      {
+        source: 'millwright.cli',
+        'detail-type': 'rerun',
+        detail: {
+          repo: 'octocat/app',
+          ref: 'refs/heads/main',
+          sha: SHA,
+          workflow: 'ci',
+          sourceRunNumber: 41,
+          nonce: 'nonce-1',
+        },
+      },
+      NOW,
+    );
+    expect(starter.startedRuns).toEqual(['octocat/app#ci#42']);
+    expect(store.checks).toEqual([]);
+  });
+
+  it('is best-effort: a failing check write never stops the run from starting', async () => {
+    const { deps, store, starter } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);
+    store.failNextCheckWrite = true;
+    const result = await processBusEvent(deps, pushEvent(), NOW);
+    expect(result).toMatchObject({ outcome: 'runs', started: ['octocat/app#ci#1'] });
+    expect(starter.startedRuns).toEqual(['octocat/app#ci#1']);
+    expect(store.checks).toEqual([]);
   });
 });

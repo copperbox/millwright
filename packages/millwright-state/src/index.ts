@@ -229,6 +229,8 @@ export {
   checkBackoffSeconds,
   checkConclusionForJobStatus,
   commitStatusForDesired,
+  desiredBootstrapSynthFailed,
+  desiredBootstrapSynthSucceeded,
   desiredJobCheck,
   desiredSynthFailed,
   desiredSynthStarted,

@@ -23,6 +23,7 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { DesiredCheckWrite, sendDesiredCheckUpsert } from '../shared/checks';
 import { queryJobRows } from '../shared/jobs';
 import { LauncherStore } from './launcher';
 
@@ -38,6 +39,16 @@ export class DynamoLauncherStore implements LauncherStore {
     private readonly tableName: string,
     private readonly metadataRetentionDays: number,
   ) {}
+
+  async putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean> {
+    return sendDesiredCheckUpsert(
+      this.client,
+      this.tableName,
+      write,
+      nowMs,
+      this.metadataRetentionDays,
+    );
+  }
 
   async claimEvent(
     identity: EventIdentity,

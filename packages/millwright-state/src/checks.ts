@@ -232,6 +232,31 @@ export function desiredSynthFailed(runId: string, error: string): DesiredCheckSt
   };
 }
 
+/**
+ * Bootstrap (`synth-only`) executions have no run to name: the repo-level
+ * `millwright / synth` check (spec §B2) reports the sha it validated.
+ */
+export function desiredBootstrapSynthSucceeded(
+  sha: string,
+  workflowCount: number,
+): DesiredCheckState {
+  return {
+    status: 'completed',
+    conclusion: 'success',
+    title: 'Workflow definitions are valid',
+    summary: `Synthesized ${workflowCount} workflow(s) at \`${sha.slice(0, 12)}\`.`,
+  };
+}
+
+export function desiredBootstrapSynthFailed(sha: string, error: string): DesiredCheckState {
+  return {
+    status: 'completed',
+    conclusion: 'failure',
+    title: 'Workflow definitions failed to synthesize',
+    summary: `Synth failed at \`${sha.slice(0, 12)}\`.\n\n\`\`\`\n${error}\n\`\`\``,
+  };
+}
+
 export interface StepReportLine {
   readonly name: string;
   readonly status: StepStatus;
@@ -285,9 +310,19 @@ export function jobCheckSummary(content: JobCheckContent): string {
   return lines.join('\n');
 }
 
+/** A live job's check status: `queued` until dispatch, `in_progress` after. */
+const LIVE_CHECK_STATUSES: Partial<Record<JobStatus, 'queued' | 'in_progress'>> = {
+  PENDING: 'queued',
+  QUEUED: 'in_progress',
+  PROVISIONING: 'in_progress',
+  RUNNING: 'in_progress',
+};
+
 /**
- * The desired state for a job check: `queued`/`in_progress` while pending,
- * or completed from the job's terminal status.
+ * The desired state for a job check from the job's status: `queued` before
+ * dispatch (PENDING), `in_progress` once a build was claimed (QUEUED /
+ * PROVISIONING / RUNNING), or completed from the terminal status. The
+ * explicit `queued` / `in_progress` spellings are accepted too.
  */
 export function desiredJobCheck(
   status: 'queued' | 'in_progress' | JobStatus,
@@ -295,11 +330,12 @@ export function desiredJobCheck(
 ): DesiredCheckState {
   const summary = jobCheckSummary(content);
   const detailsUrl = content.detailsUrl !== undefined ? { detailsUrl: content.detailsUrl } : {};
-  if (status === 'queued' || status === 'in_progress') {
-    const title = status === 'queued' ? 'Queued' : 'In progress';
-    return { status, title, summary, ...detailsUrl };
+  const live = status === 'queued' || status === 'in_progress' ? status : LIVE_CHECK_STATUSES[status];
+  if (live) {
+    const title = live === 'queued' ? 'Queued' : 'In progress';
+    return { status: live, title, summary, ...detailsUrl };
   }
-  const conclusion = checkConclusionForJobStatus(status);
+  const conclusion = checkConclusionForJobStatus(status as JobStatus);
   const titles: Record<CheckConclusion, string> = {
     success: 'Succeeded',
     failure: 'Failed',

@@ -9,14 +9,17 @@ import {
   RunItem,
   TERMINAL_RUN_STATUSES,
   ValidBusEvent,
+  desiredSynthStarted,
   formatRunId,
   jobOutputPrefix,
   parseRunId,
   runInputPrefix,
   runKey,
+  synthCheckContext,
   validateBusEvent,
   withMetadataTtl,
 } from '@copperbox/millwright-state';
+import { DesiredCheckWrite } from '../shared/checks';
 import { ExecutionStarter } from '../shared/executions';
 import { evaluateGroupKey, matchWorkflows, workflowConcurrency } from './match';
 
@@ -64,6 +67,12 @@ export interface LauncherStore {
    * re-reads and adopts that run; this delivery's number is abandoned).
    */
   createRun(run: RunItem, identity: EventIdentity, nowMs: number): Promise<boolean>;
+  /**
+   * The §13.2 ownership upsert onto a check item — used for the run's
+   * `<workflow> / synth` check at run start. False when a newer run already
+   * owns the context.
+   */
+  putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean>;
   getRun(coords: RunCoordinates): Promise<RunItem | undefined>;
   /** The source run's job rows — what a rerun's reuse set is computed from. */
   listJobs(coords: RunCoordinates): Promise<readonly JobItem[]>;
@@ -246,10 +255,46 @@ export async function processBusEvent(
       settled.push(formatRunId(run));
       continue;
     }
+    await openSynthCheck(deps, run, nowMs);
     const outcome = await gate(deps, run, workflow.concurrency?.policy ?? 'queue', nowMs);
     (outcome === 'started' ? started : queued).push(formatRunId(run));
   }
   return { outcome: 'runs', started, queued, settled };
+}
+
+/**
+ * Run start opens the run's `<workflow> / synth` check `in_progress` (spec
+ * §13.2 lifecycle), so a broken `workflows.ts` is visible on the PR from the
+ * moment the run exists — queued runs included, since their synth is only
+ * waiting on the group. Post-synth completes the same item under the same
+ * owner. Reruns never come here: they skip synth and would otherwise take the
+ * sha's completed check back to `in_progress` for good. Best-effort — the
+ * run must start whether or not the check row cooperates; post-synth's
+ * completing write creates the item regardless.
+ */
+async function openSynthCheck(deps: LauncherDeps, run: RunItem, nowMs: number): Promise<void> {
+  const label = `${run.workflow}#${run.runNumber}`;
+  try {
+    const written = await deps.store.putDesiredCheck(
+      {
+        repo: run.repo,
+        sha: run.sha,
+        context: synthCheckContext(run.workflow),
+        ownerRun: label,
+        ownerRunNumber: run.runNumber,
+        desired: desiredSynthStarted(label),
+      },
+      nowMs,
+    );
+    if (!written) {
+      deps.log('synth check owned by a newer run; not reopened', { runId: formatRunId(run) });
+    }
+  } catch (err) {
+    deps.log('could not open the synth check', {
+      runId: formatRunId(run),
+      error: (err as Error).message,
+    });
+  }
 }
 
 /**

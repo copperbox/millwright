@@ -9,6 +9,8 @@ import {
   checkBackoffSeconds,
   checkConclusionForJobStatus,
   commitStatusForDesired,
+  desiredBootstrapSynthFailed,
+  desiredBootstrapSynthSucceeded,
   desiredJobCheck,
   desiredSynthFailed,
   desiredSynthStarted,
@@ -149,6 +151,20 @@ describe('synth check content (spec §13.2 content)', () => {
     expect(desired).toMatchObject({ status: 'completed', conclusion: 'failure' });
     expect(desired.summary).toContain('workflows.ts:12 unknown trigger "pushh"');
   });
+
+  it('bootstrap outcomes name the sha instead of a run and round-trip the serialization', () => {
+    const sha = 'a'.repeat(40);
+    const succeeded = desiredBootstrapSynthSucceeded(sha, 2);
+    expect(succeeded).toMatchObject({ status: 'completed', conclusion: 'success' });
+    expect(succeeded.summary).toContain('aaaaaaaaaaaa');
+    expect(succeeded.summary).toContain('2 workflow(s)');
+    expect(parseDesiredCheckState(serializeDesiredCheckState(succeeded))).toEqual(succeeded);
+
+    const failed = desiredBootstrapSynthFailed(sha, 'Invalid run model: workflows: required');
+    expect(failed).toMatchObject({ status: 'completed', conclusion: 'failure' });
+    expect(failed.summary).toContain('Invalid run model: workflows: required');
+    expect(parseDesiredCheckState(serializeDesiredCheckState(failed))).toEqual(failed);
+  });
 });
 
 describe('job check content (spec §13.2 content)', () => {
@@ -180,6 +196,24 @@ describe('job check content (spec §13.2 content)', () => {
   it('builds a completed desired state from a terminal job status', () => {
     const desired = desiredJobCheck('SUCCEEDED', { runId: 'ci#142', steps: [] });
     expect(desired).toMatchObject({ status: 'completed', conclusion: 'success' });
+  });
+
+  it('maps live job statuses onto the check lifecycle: PENDING queued, dispatched in_progress', () => {
+    const content = { runId: 'ci#142', steps: [] };
+    expect(desiredJobCheck('PENDING', content)).toMatchObject({ status: 'queued', title: 'Queued' });
+    for (const status of ['QUEUED', 'PROVISIONING', 'RUNNING'] as const) {
+      expect(desiredJobCheck(status, content)).toMatchObject({
+        status: 'in_progress',
+        title: 'In progress',
+      });
+    }
+    expect(desiredJobCheck('SKIPPED', content)).toMatchObject({
+      status: 'completed',
+      conclusion: 'skipped',
+      title: 'Skipped',
+    });
+    expect(desiredJobCheck('CANCELLED', content)).toMatchObject({ conclusion: 'cancelled' });
+    expect(desiredJobCheck('TIMED_OUT', content)).toMatchObject({ conclusion: 'timed_out' });
   });
 });
 
