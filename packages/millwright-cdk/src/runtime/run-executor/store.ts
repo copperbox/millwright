@@ -1,6 +1,7 @@
 import {
   BuildMappingItem,
   JobItem,
+  JobStatus,
   RunCoordinates,
   RunItem,
   buildMappingKey,
@@ -15,11 +16,12 @@ import {
   JobProjectionPatch,
   RunRows,
   isConditionalCheckFailure,
+  jobCheckedStatusUpdate,
   jobProjectionUpdate,
   queryRunRows,
 } from '../shared/jobs';
 import { finishRunConditionally } from '../shared/runs';
-import { DeciderStore } from './iteration';
+import { DeciderStore, IterationBegun } from './iteration';
 
 /**
  * The decider's state-table access (spec §7.8 write partition: run + job
@@ -35,19 +37,22 @@ export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderS
     taskToken: string,
     opts: { readonly markStarted: boolean },
     nowMs: number,
-  ): Promise<'ok' | 'terminal'> {
+  ): Promise<IterationBegun | 'terminal'> {
     const nowIso = new Date(nowMs).toISOString();
     try {
-      await this.client.send(
+      const result = await this.client.send(
         new UpdateCommand({
           TableName: this.tableName,
           Key: runKey(coords),
           // First start overwrites the launcher's createdAt placeholder in
           // originalStartedAt: the deadline anchor is the first EXECUTION
           // start, so time spent QUEUED never counts against the deadline.
-          UpdateExpression: opts.markStarted
-            ? 'SET taskToken = :token, #status = :running, startedAt = :now, originalStartedAt = :now'
-            : 'SET taskToken = :token, #status = :running',
+          // The sequence counter is bumped in the same conditional write, so
+          // it is unique per iteration and ordered the way iterations began.
+          UpdateExpression:
+            (opts.markStarted
+              ? 'SET taskToken = :token, #status = :running, startedAt = :now, originalStartedAt = :now'
+              : 'SET taskToken = :token, #status = :running') + ' ADD deciderSequence :one',
           ConditionExpression: '#status IN (:pending, :queued, :running)',
           ExpressionAttributeNames: { '#status': 'status' },
           ExpressionAttributeValues: {
@@ -55,11 +60,17 @@ export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderS
             ':running': 'RUNNING',
             ':pending': 'PENDING',
             ':queued': 'QUEUED',
+            ':one': 1,
             ...(opts.markStarted ? { ':now': nowIso } : {}),
           },
+          ReturnValues: 'ALL_NEW',
         }),
       );
-      return 'ok';
+      const sequence = (result.Attributes as RunItem | undefined)?.deciderSequence;
+      if (typeof sequence !== 'number') {
+        throw new Error(`beginIteration returned no deciderSequence for ${runKey(coords).pk}`);
+      }
+      return { sequence };
     } catch (err) {
       if (isConditionalCheckFailure(err)) {
         return 'terminal';
@@ -80,6 +91,19 @@ export class DynamoDeciderStore extends DynamoGroupSlotStore implements DeciderS
       nowMs,
       this.metadataRetentionDays,
     );
+  }
+
+  async markJobChecked(coords: RunCoordinates, job: string, status: JobStatus): Promise<void> {
+    try {
+      await this.client.send(
+        new UpdateCommand(jobCheckedStatusUpdate(this.tableName, coords, job, status)),
+      );
+    } catch (err) {
+      // No row yet (a row-less job opened `queued`): nothing to mark.
+      if (!isConditionalCheckFailure(err)) {
+        throw err;
+      }
+    }
   }
 
   async seedReusedJob(

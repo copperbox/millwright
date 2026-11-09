@@ -208,6 +208,7 @@ export class Millwright extends Construct {
       stateTable: this.stateTable,
       artifactBucket: this.artifactBucket,
       eventBusName: this.eventBus.busName,
+      buildLogGroupName: stores.buildLogGroupName,
       metadataRetention: this.metadataRetention,
     });
     this.buildProject = new BuildProject(this, 'BuildProject', {

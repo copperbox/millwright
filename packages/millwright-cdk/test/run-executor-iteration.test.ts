@@ -4,12 +4,14 @@ import {
   ConcurrencyGroupItem,
   DesiredCheckState,
   JobItem,
+  JobStatus,
   RunCoordinates,
   RunItem,
   RunModel,
   RunModelJob,
   StepItem,
   buildMappingKey,
+  cloudWatchLogLink,
   concurrencyGroupKey,
   formatRunId,
   jobKey,
@@ -58,7 +60,17 @@ class MemoryStore implements DeciderStore {
   readonly mappings = new Map<string, BuildMappingItem>();
   readonly groups = new Map<string, { running?: string; pending?: string }>();
   readonly steps = new Map<string, StepItem>();
+  /** Check writes the table accepted, in order. */
   readonly checks: { write: DesiredCheckWrite; nowMs: number }[] = [];
+  /** Check writes the ownership/sequence condition rejected. */
+  readonly rejectedChecks: DesiredCheckWrite[] = [];
+  private readonly checkOwners = new Map<string, { runNumber: number; sequence?: number }>();
+  /**
+   * When set, check writes are parked here instead of reaching the table —
+   * an iteration stalled between its row writes and its check writes.
+   * `releaseHeldChecks` lets them land later, as the real writes would.
+   */
+  heldChecks?: { write: DesiredCheckWrite; nowMs: number }[];
   failCheckWrites = false;
   checksOwnedByNewerRun = false;
 
@@ -93,20 +105,22 @@ class MemoryStore implements DeciderStore {
     taskToken: string,
     opts: { markStarted: boolean },
     nowMs: number,
-  ): Promise<'ok' | 'terminal'> {
+  ): Promise<{ sequence: number } | 'terminal'> {
     const run = this.runOf(coords);
     if (!run || !['PENDING', 'QUEUED', 'RUNNING'].includes(run.status)) {
       return 'terminal';
     }
     const key = runKey(coords);
     const nowIso = new Date(nowMs).toISOString();
+    const sequence = (run.deciderSequence ?? 0) + 1;
     this.runs.set(key.pk + key.sk, {
       ...run,
       taskToken,
       status: 'RUNNING',
+      deciderSequence: sequence,
       ...(opts.markStarted ? { startedAt: nowIso, originalStartedAt: nowIso } : {}),
     });
-    return 'ok';
+    return { sequence };
   }
 
   async listRunRows(
@@ -137,8 +151,53 @@ class MemoryStore implements DeciderStore {
     if (this.failCheckWrites) {
       throw new Error('injected check-table error');
     }
+    if (this.heldChecks) {
+      this.heldChecks.push({ write, nowMs });
+      return true;
+    }
+    return this.applyCheck(write, nowMs);
+  }
+
+  /** The DynamoDB condition of `desiredCheckUpsert`, applied in memory. */
+  private applyCheck(write: DesiredCheckWrite, nowMs: number): boolean {
+    if (this.checksOwnedByNewerRun) {
+      this.checks.push({ write, nowMs });
+      return false;
+    }
+    const owner = this.checkOwners.get(write.context);
+    const sequenced = write.ownerSequence !== undefined;
+    const sameRunInOrder =
+      owner?.runNumber === write.ownerRunNumber &&
+      (!sequenced || owner.sequence === undefined || owner.sequence <= write.ownerSequence!);
+    if (owner && owner.runNumber > write.ownerRunNumber) {
+      this.rejectedChecks.push(write);
+      return false;
+    }
+    if (owner && owner.runNumber === write.ownerRunNumber && !sameRunInOrder) {
+      this.rejectedChecks.push(write);
+      return false;
+    }
+    this.checkOwners.set(write.context, {
+      runNumber: write.ownerRunNumber,
+      sequence: sequenced ? write.ownerSequence : owner?.sequence,
+    });
     this.checks.push({ write, nowMs });
-    return !this.checksOwnedByNewerRun;
+    return true;
+  }
+
+  /** Let the parked check writes reach the table now; returns each write's outcome. */
+  releaseHeldChecks(): boolean[] {
+    const held = this.heldChecks ?? [];
+    this.heldChecks = undefined;
+    return held.map(({ write, nowMs }) => this.applyCheck(write, nowMs));
+  }
+
+  async markJobChecked(coords: RunCoordinates, job: string, status: JobStatus): Promise<void> {
+    const key = jobKey(coords, job);
+    const row = this.jobs.get(key.pk + key.sk);
+    if (row) {
+      this.jobs.set(key.pk + key.sk, { ...row, checkedStatus: status });
+    }
   }
 
   /** The check writes for one job, oldest first, as the reporter would read them. */
@@ -752,6 +811,86 @@ describe('decider iteration — per-job checks (spec §13.2 lifecycle, #51)', ()
       expect(write.desired.summary).toContain('ci#7');
       expect(nowMs).toBeGreaterThanOrEqual(NOW);
     }
+    // Each iteration stamps its own sequence; the rows remember what was written.
+    expect(store.checks.map((c) => c.write.ownerSequence)).toEqual([1, 1, 2, 2, 3, 3]);
+    expect(store.run().deciderSequence).toBe(3);
+    expect(store.job('build')?.checkedStatus).toBe('SUCCEEDED');
+    expect(store.job('test')?.checkedStatus).toBe('SUCCEEDED');
+  });
+
+  it('completes a check whose terminal status the build-events handler projected before the iteration', async () => {
+    const { store, runner, deps } = harness();
+    store.seedRun();
+    await iterate(deps, 0, NOW);
+    expect(store.job('build')).toMatchObject({ status: 'QUEUED', checkedStatus: 'QUEUED' });
+
+    // The build finishes and the build-events handler projects SUCCEEDED onto
+    // the row before waking the loop: the iteration reads SUCCEEDED from the
+    // start, so a before/after snapshot of its own writes would never change.
+    runner.finish('mw-builds:1', 'SUCCEEDED');
+    await store.writeJobProjection(
+      COORDS,
+      'build',
+      { status: 'SUCCEEDED', logStreamName: 'stream-mw-builds:1', ifBuildId: 'mw-builds:1' },
+      NOW + 30_000,
+    );
+    expect(store.job('build')).toMatchObject({ status: 'SUCCEEDED', checkedStatus: 'QUEUED' });
+
+    // The dependent dispatches, so the run is NOT terminal: the completion
+    // must come from the phase comparison, not the terminal safety net.
+    expect(await iterate(deps, 1, NOW + 60_000)).toBe('parked');
+    expect(store.checkHistory('build').map(phase)).toEqual(['in_progress', 'completed/success']);
+    expect(store.job('build')?.checkedStatus).toBe('SUCCEEDED');
+    expect(store.checkHistory('test').map(phase)).toEqual(['queued', 'in_progress']);
+
+    // And the next quiet re-entry writes nothing more.
+    const written = store.checks.length;
+    await iterate(deps, 2, NOW + 120_000);
+    expect(store.checks).toHaveLength(written);
+  });
+
+  it('drops a stalled in_progress write that lands after a later iteration completed the run', async () => {
+    const { store, runner, deps } = harness();
+    store.seedRun();
+
+    // Iteration 0 dispatches build, but its check writes stall in flight.
+    store.heldChecks = [];
+    expect(await iterate(deps, 0, NOW)).toBe('parked');
+    expect(store.heldChecks.map((h) => h.write.desired.status)).toEqual(['in_progress', 'queued']);
+    const stalled = store.heldChecks;
+    store.heldChecks = undefined;
+
+    // Meanwhile the build fails fast, the event wakes the loop and the next
+    // iteration finishes the run: build failed, test skipped.
+    runner.finish('mw-builds:1', 'FAILED');
+    expect(await iterate(deps, 1, NOW + 2_000)).toBe('terminal');
+    expect(phase(store.checkHistory('build').at(-1)!)).toBe('completed/failure');
+    expect(phase(store.checkHistory('test').at(-1)!)).toBe('completed/skipped');
+
+    // Now the stalled writes arrive. Both share the run's number with the
+    // completed writes; only the sequence fence tells them apart.
+    store.heldChecks = stalled;
+    expect(store.releaseHeldChecks()).toEqual([false, false]);
+    expect(store.rejectedChecks.map((w) => [w.context, w.ownerSequence])).toEqual([
+      ['ci / build', 1],
+      ['ci / test', 1],
+    ]);
+    expect(phase(store.checkHistory('build').at(-1)!)).toBe('completed/failure');
+    expect(phase(store.checkHistory('test').at(-1)!)).toBe('completed/skipped');
+  });
+
+  it('deep-links a check to its build log stream when the deployment’s log location is known', async () => {
+    const { store, runner, deps } = harness();
+    const logs = { region: 'eu-west-1', logGroup: '/millwright/ci/builds' };
+    store.seedRun();
+    await iterate({ ...deps, logs }, 0, NOW);
+    runner.finish('mw-builds:1', 'FAILED');
+    expect(await iterate({ ...deps, logs }, 1, NOW + 60_000)).toBe('terminal');
+
+    const build = store.checkHistory('build').at(-1)!;
+    expect(build.detailsUrl).toBe(cloudWatchLogLink(logs.region, logs.logGroup, 'stream-mw-builds:1'));
+    // The never-started dependent has no stream to link.
+    expect(store.checkHistory('test').at(-1)!.detailsUrl).toBeUndefined();
   });
 
   it('writes nothing when an iteration changes nothing', async () => {
@@ -783,7 +922,7 @@ describe('decider iteration — per-job checks (spec §13.2 lifecycle, #51)', ()
     expect(phase(build)).toBe('completed/failure');
     expect(build.summary).toContain('| npm ci | SUCCEEDED | 4s |');
     expect(build.summary).toContain('| npm test | FAILED | — |');
-    expect(build.summary).toContain('millwright logs ci#7 --job build');
+    expect(build.summary).toContain('millwright logs octo/app/ci#7 --job build');
 
     const test = store.checkHistory('test').at(-1)!;
     expect(phase(test)).toBe('completed/skipped');

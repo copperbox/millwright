@@ -13,6 +13,7 @@ import {
   RunStatus,
   StepItem,
   TERMINAL_RUN_STATUSES,
+  cloudWatchLogLink,
   formatRunId as formatFullRunId,
   parseRunId,
   runKey,
@@ -450,17 +451,7 @@ export async function runsList(deps: RunsDeps, options: RunsListOptions = {}): P
 }
 
 /** CloudWatch console deep link for one build's log stream (spec §15: no web UI of our own). */
-export function cloudWatchLogLink(
-  region: string,
-  logGroup: string,
-  logStream: string,
-): string {
-  const encode = (part: string) => encodeURIComponent(part).replace(/%/g, '$25');
-  return (
-    `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}` +
-    `#logsV2:log-groups/log-group/${encode(logGroup)}/log-events/${encode(logStream)}`
-  );
-}
+export { cloudWatchLogLink };
 
 function jobOrder(a: JobView, b: JobView): number {
   if (a.startedAt && b.startedAt && a.startedAt !== b.startedAt) {

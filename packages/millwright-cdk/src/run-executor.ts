@@ -21,6 +21,8 @@ export interface RunExecutorProps {
   readonly artifactBucket: s3.IBucket;
   /** C3 — the bus name dispatch hands the shim for step-event PutEvents. */
   readonly eventBusName: string;
+  /** C11's log group name; job checks deep-link into it (spec §13.2 content). */
+  readonly buildLogGroupName: string;
   /** State-table TTL horizon stamped onto decider-written rows. */
   readonly metadataRetention: Duration;
 }
@@ -98,6 +100,7 @@ export class RunExecutor extends Construct {
         STATE_TABLE_NAME: props.stateTable.tableName,
         ARTIFACT_BUCKET_NAME: props.artifactBucket.bucketName,
         BUILD_PROJECT_NAME: this.buildProjectName,
+        BUILD_LOG_GROUP_NAME: props.buildLogGroupName,
         DEPLOYMENT_NAME: name,
         EVENT_BUS_NAME: props.eventBusName,
         METADATA_RETENTION_DAYS: String(props.metadataRetention.toDays()),

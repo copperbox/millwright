@@ -27,17 +27,32 @@ export interface DesiredCheckWrite extends UnownedDesiredCheckWrite {
   readonly ownerRun: string;
   /** The comparand for the ownership condition — total within one context. */
   readonly ownerRunNumber: number;
+  /**
+   * The owning run's decider iteration sequence (`RunItem.deciderSequence`).
+   * Orders writes WITHIN one run: a write carrying a lower sequence than the
+   * stored one loses, so an iteration that stalled between its row writes
+   * and its check write cannot regress a check a later iteration completed.
+   * Writers outside the decider loop (launcher, post-synth, synth-failure)
+   * omit it; their contexts have one writer per phase.
+   */
+  readonly ownerSequence?: number;
 }
 
 /**
  * Ownership rule: the newest run owns the context. The write is conditional
  * on this run's number ≥ the stored owner's; the caller treats a conditional
  * failure as a silent drop (the older run's jobs still render in
- * `runs show`). `checkRunId` and `reported` are deliberately untouched so
- * same-or-newer writes carry the existing check run forward and the reporter
- * updates it instead of minting a duplicate. A fresh desired state restarts
- * reconciliation: backoff and abandonment are cleared, and `desiredAt`
- * re-anchors the 7-day abandonment clock.
+ * `runs show`). Within one run, a write carrying `ownerSequence` must also be
+ * at least as new as the stored sequence: two iterations of the same run can
+ * overlap (a build event consumes the parked token while the previous
+ * iteration is still writing), and without this fence the older iteration's
+ * `in_progress` could land over the newer one's conclusion after the run is
+ * already terminal, with nothing left to repair it. `checkRunId` and
+ * `reported` are deliberately untouched so same-or-newer writes carry the
+ * existing check run forward and the reporter updates it instead of minting
+ * a duplicate. A fresh desired state restarts reconciliation: backoff and
+ * abandonment are cleared, and `desiredAt` re-anchors the 7-day abandonment
+ * clock.
  */
 export function desiredCheckUpsert(
   tableName: string,
@@ -45,15 +60,20 @@ export function desiredCheckUpsert(
   nowMs: number,
   retentionDays: number,
 ): UpdateCommandInput {
+  const sequenced = write.ownerSequence !== undefined;
   return {
     TableName: tableName,
     Key: checkStateKey(write.repo, write.sha, write.context),
     UpdateExpression:
       'SET repo = :repo, sha = :sha, #context = :context, desired = :desired, ' +
       'desiredAt = :desiredAt, ownerRun = :ownerRun, ownerRunNumber = :ownerRunNumber, ' +
+      (sequenced ? 'ownerSequence = :ownerSequence, ' : '') +
       '#ttl = :expiresAt REMOVE abandoned, backoffAttempts, nextAttemptAt',
-    ConditionExpression:
-      'attribute_not_exists(ownerRunNumber) OR ownerRunNumber <= :ownerRunNumber',
+    ConditionExpression: sequenced
+      ? 'attribute_not_exists(ownerRunNumber) OR ownerRunNumber < :ownerRunNumber OR ' +
+        '(ownerRunNumber = :ownerRunNumber AND ' +
+        '(attribute_not_exists(ownerSequence) OR ownerSequence <= :ownerSequence))'
+      : 'attribute_not_exists(ownerRunNumber) OR ownerRunNumber <= :ownerRunNumber',
     ExpressionAttributeNames: { '#context': 'context', '#ttl': 'expiresAt' },
     ExpressionAttributeValues: {
       ':repo': write.repo,
@@ -63,6 +83,7 @@ export function desiredCheckUpsert(
       ':desiredAt': new Date(nowMs).toISOString(),
       ':ownerRun': write.ownerRun,
       ':ownerRunNumber': write.ownerRunNumber,
+      ...(sequenced ? { ':ownerSequence': write.ownerSequence } : {}),
       ':expiresAt': expiresAtAfterDays(nowMs, retentionDays),
     },
   };

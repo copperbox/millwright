@@ -93,6 +93,13 @@ export interface RunItem extends ExpiringItem {
   readonly inputs?: Readonly<Record<string, string | boolean>>;
   /** Current Step Functions task token; rewritten every decider iteration. */
   readonly taskToken?: string;
+  /**
+   * Monotonic decider iteration counter, incremented atomically with each
+   * token write and carried across carry-over executions. Stamped onto the
+   * run's check writes as `ownerSequence` so a slow iteration's write can
+   * never land over a later iteration's (spec §13.2 ordering fence).
+   */
+  readonly deciderSequence?: number;
 }
 
 /**
@@ -118,6 +125,14 @@ export interface JobItem extends ExpiringItem {
   /** Run id whose succeeded output this job was seeded from (`rerun --failed`). */
   readonly reusedFrom?: string;
   readonly skipReason?: SkipReason;
+  /**
+   * The job status the decider last projected onto the job's GitHub check
+   * (spec §13.2). Absent until the first check write. Compared against
+   * `status` to decide whether the check needs a write, so a terminal status
+   * the build-events handler projected ahead of the iteration still reaches
+   * the check.
+   */
+  readonly checkedStatus?: JobStatus;
 }
 
 /** `RUN#…` / `JOB#<name>#STEP#<index>` — written by C19; display-plane only. */

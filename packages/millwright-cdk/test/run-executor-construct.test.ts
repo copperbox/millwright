@@ -16,6 +16,7 @@ function synth(): { executor: RunExecutor; template: Template } {
     }),
     artifactBucket: new s3.Bucket(stack, 'Artifacts'),
     eventBusName: 'ci-bus',
+    buildLogGroupName: '/millwright/ci/builds',
     metadataRetention: Duration.days(90),
   });
   return { executor, template: Template.fromStack(stack) };
@@ -53,6 +54,8 @@ describe('run executor wiring (C5–C7)', () => {
       Environment: {
         Variables: Match.objectLike({
           BUILD_PROJECT_NAME: 'ci-builds',
+          // Job checks deep-link into the build logs (spec §13.2 content).
+          BUILD_LOG_GROUP_NAME: '/millwright/ci/builds',
           DEPLOYMENT_NAME: 'ci',
           METADATA_RETENTION_DAYS: '90',
           // Group hand-off target (spec §8.4), spelled from the pinned name.

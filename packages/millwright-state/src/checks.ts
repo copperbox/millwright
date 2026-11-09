@@ -290,6 +290,18 @@ export interface JobCheckContent {
   readonly detailsUrl?: string;
 }
 
+/**
+ * CloudWatch console deep link for one build's log stream: the job check's
+ * `details_url` (PAT: `target_url`) and the CLI's `runs show` log line.
+ */
+export function cloudWatchLogLink(region: string, logGroup: string, logStream: string): string {
+  const encode = (part: string) => encodeURIComponent(part).replace(/%/g, '$25');
+  return (
+    `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}` +
+    `#logsV2:log-groups/log-group/${encode(logGroup)}/log-events/${encode(logStream)}`
+  );
+}
+
 function formatDuration(seconds: number): string {
   const whole = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(whole / 60);

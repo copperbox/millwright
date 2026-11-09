@@ -62,7 +62,12 @@ function dependencies(): DeciderDeps {
       ? Number(process.env.METADATA_RETENTION_DAYS)
       : DEFAULT_METADATA_RETENTION_DAYS;
     const sfn = new SFNClient({});
+    // Job checks deep-link into the build log group; both parts come from the
+    // Lambda environment, and a deployment without either simply has no links.
+    const region = process.env.AWS_REGION;
+    const logGroup = process.env.BUILD_LOG_GROUP_NAME;
     deps = {
+      ...(region && logGroup ? { logs: { region, logGroup } } : {}),
       store: new DynamoDeciderStore(dynamo, requireEnv('STATE_TABLE_NAME'), metadataRetentionDays),
       // Group hand-off: starts the pending run on this same state machine.
       starter: new SfnExecutionStarter(sfn, requireEnv('RUN_EXECUTOR_ARN'), log),

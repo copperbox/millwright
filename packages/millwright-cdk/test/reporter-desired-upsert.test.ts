@@ -38,6 +38,24 @@ describe('desiredCheckUpsert (spec §13.2 ownership)', () => {
     expect(input.ExpressionAttributeValues![':ownerRunNumber']).toBe(142);
   });
 
+  it('fences writes within one run by ownerSequence when the writer carries one', () => {
+    const input = desiredCheckUpsert('table', { ...write, ownerSequence: 3 }, NOW, 90);
+    expect(input.ConditionExpression).toBe(
+      'attribute_not_exists(ownerRunNumber) OR ownerRunNumber < :ownerRunNumber OR ' +
+        '(ownerRunNumber = :ownerRunNumber AND ' +
+        '(attribute_not_exists(ownerSequence) OR ownerSequence <= :ownerSequence))',
+    );
+    expect(input.UpdateExpression).toContain('ownerSequence = :ownerSequence');
+    expect(input.ExpressionAttributeValues![':ownerSequence']).toBe(3);
+    expect(input.ExpressionAttributeValues![':ownerRunNumber']).toBe(142);
+  });
+
+  it('leaves ownerSequence alone for writers without one', () => {
+    const input = desiredCheckUpsert('table', write, NOW, 90);
+    expect(input.UpdateExpression).not.toMatch(/ownerSequence/);
+    expect(input.ExpressionAttributeValues).not.toHaveProperty(':ownerSequence');
+  });
+
   it('writes the canonical desired serialization, owner identity, clock and TTL', () => {
     const input = desiredCheckUpsert('table', write, NOW, 90);
     const values = input.ExpressionAttributeValues!;

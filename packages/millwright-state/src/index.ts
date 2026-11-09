@@ -228,6 +228,7 @@ export {
   SYNTH_CONTEXT_SEGMENT,
   checkBackoffSeconds,
   checkConclusionForJobStatus,
+  cloudWatchLogLink,
   commitStatusForDesired,
   desiredBootstrapSynthFailed,
   desiredBootstrapSynthSucceeded,

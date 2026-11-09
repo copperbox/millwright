@@ -76,6 +76,27 @@ export function jobProjectionUpdate(
   };
 }
 
+/**
+ * Record the status the decider just projected onto a job's GitHub check
+ * (`JobItem.checkedStatus`). Conditional on the row existing: a job that is
+ * still queued with no row (first-iteration `queued` creates) gets nothing
+ * written, and the caller treats that conditional failure as a no-op.
+ */
+export function jobCheckedStatusUpdate(
+  tableName: string,
+  coords: RunCoordinates,
+  job: string,
+  status: JobStatus,
+): UpdateCommandInput {
+  return {
+    TableName: tableName,
+    Key: jobKey(coords, job),
+    UpdateExpression: 'SET checkedStatus = :checkedStatus',
+    ConditionExpression: 'attribute_exists(pk)',
+    ExpressionAttributeValues: { ':checkedStatus': status },
+  };
+}
+
 export interface RunRows {
   readonly jobs: readonly JobItem[];
   readonly steps: readonly StepItem[];

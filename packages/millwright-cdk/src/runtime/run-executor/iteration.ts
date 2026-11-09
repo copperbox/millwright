@@ -18,7 +18,7 @@ import { DesiredCheckWrite } from '../shared/checks';
 import { carryOverExecutionName } from '../shared/executions';
 import { GroupSlotStore, PendingRunStarter, releaseGroupSlot } from '../shared/groups';
 import { JobProjectionPatch, RunRows } from '../shared/jobs';
-import { planJobCheckWrites } from './job-checks';
+import { BuildLogLocation, PlannedJobCheck, planJobCheckWrites } from './job-checks';
 
 /**
  * One decider iteration (spec §7.3, C6): the Lambda host around the pure
@@ -67,27 +67,44 @@ export interface DispatchContext {
   readonly serviceRoleArn?: string;
 }
 
+/** A begun iteration's position in the run's iteration order. */
+export interface IterationBegun {
+  /**
+   * `RunItem.deciderSequence` after this iteration's bump: strictly greater
+   * than every earlier iteration's, including those of carry-over
+   * predecessors. Stamped onto the iteration's check writes as the
+   * `ownerSequence` fence.
+   */
+  readonly sequence: number;
+}
+
 export interface DeciderStore extends GroupSlotStore {
   getRun(coords: RunCoordinates): Promise<RunItem | undefined>;
   /**
-   * Write the iteration's task token; on `markStarted`, also stamp
-   * startedAt/originalStartedAt (the deadline anchor) and flip the run
-   * RUNNING. Returns 'terminal' (nothing written) when the run is already
-   * finished — a race with another iteration.
+   * Write the iteration's task token and bump the run's iteration sequence;
+   * on `markStarted`, also stamp startedAt/originalStartedAt (the deadline
+   * anchor) and flip the run RUNNING. Returns 'terminal' (nothing written)
+   * when the run is already finished — a race with another iteration.
    */
   beginIteration(
     coords: RunCoordinates,
     taskToken: string,
     opts: { readonly markStarted: boolean },
     nowMs: number,
-  ): Promise<'ok' | 'terminal'>;
+  ): Promise<IterationBegun | 'terminal'>;
   /** The run's job rows plus its step rows (for the job checks' step table). */
   listRunRows(coords: RunCoordinates): Promise<RunRows>;
   /**
    * The §13.2 ownership upsert onto a job's check item. False when a newer
-   * run owns the context — the caller drops the write silently.
+   * run owns the context, or when a later iteration of this run already
+   * wrote the item — the caller drops the write silently either way.
    */
   putDesiredCheck(write: DesiredCheckWrite, nowMs: number): Promise<boolean>;
+  /**
+   * Record on the job row which status its check now reflects
+   * (`JobItem.checkedStatus`). A no-op for a job with no row yet.
+   */
+  markJobChecked(coords: RunCoordinates, job: string, status: JobStatus): Promise<void>;
   /**
    * Seed a reused job's row terminal SUCCEEDED with `reusedFrom` (spec §7.7,
    * `rerun --failed`). Conditional on the row not existing — a no-op when a
@@ -156,6 +173,11 @@ export interface DeciderDeps {
   readonly starter: PendingRunStarter;
   /** Iterations per execution before carrying over to a fresh one. */
   readonly iterationBudget: number;
+  /**
+   * Where the build project writes its logs; job checks deep-link there
+   * (`details_url`) once a build's stream is known. Absent = no links.
+   */
+  readonly logs?: BuildLogLocation;
   readonly log: (message: string, fields?: Record<string, unknown>) => void;
 }
 
@@ -229,7 +251,8 @@ export async function runDeciderIteration(
   // First entry also stamps the deadline anchor — the original run start,
   // which carry-over executions read back and never reset (spec §7.3).
   const markStarted = !run.startedAt;
-  if ((await store.beginIteration(coords, input.taskToken, { markStarted }, nowMs)) === 'terminal') {
+  const begun = await store.beginIteration(coords, input.taskToken, { markStarted }, nowMs);
+  if (begun === 'terminal') {
     const finished = await store.getRun(coords);
     await releaseGroup(deps, finished, nowMs);
     await sender.success(input.taskToken, terminal(finished?.status ?? 'FAILED'));
@@ -249,10 +272,19 @@ export async function runDeciderIteration(
 
   const { jobs: rows, steps } = await store.listRunRows(coords);
   const rowByName = new Map(rows.map((row) => [row.job, row]));
-  // Job statuses before and after this iteration's row writes: the job
-  // checks (spec §13.2) are written on phase changes between the two.
-  const statusBefore = new Map<string, JobStatus>(rows.map((row) => [row.job, row.status]));
-  const statusAfter = new Map<string, JobStatus>(statusBefore);
+  // The job checks (spec §13.2) are written where a job's status after this
+  // iteration's row writes differs in phase from the status its check last
+  // reflected. The comparand is the row's `checkedStatus`, NOT the status
+  // read at the start of the iteration: the build-events handler projects
+  // terminal statuses onto rows before waking the loop, so a start-of-
+  // iteration snapshot already carries the new status and would hide it.
+  const statusChecked = new Map<string, JobStatus>(
+    rows.flatMap((row) => (row.checkedStatus ? [[row.job, row.checkedStatus] as const] : [])),
+  );
+  const statusAfter = new Map<string, JobStatus>(rows.map((row) => [row.job, row.status]));
+  const logStreams = new Map<string, string>(
+    rows.flatMap((row) => (row.logStreamName ? [[row.job, row.logStreamName] as const] : [])),
+  );
 
   // Rerun --failed (spec §7.7): the launcher prefix-copied these jobs'
   // outputs; the decider seeds them terminal SUCCEEDED with reusedFrom so
@@ -303,6 +335,9 @@ export async function runDeciderIteration(
         nowMs,
       );
       statusAfter.set(row.job, projected);
+      if (snapshot.logStreamName) {
+        logStreams.set(row.job, snapshot.logStreamName);
+      }
     }
   }
 
@@ -376,13 +411,17 @@ export async function runDeciderIteration(
   // a conclusion on terminal — every job once more when the run finishes.
   await reportJobChecks(
     deps,
+    coords,
     planJobCheckWrites({
       coords,
       sha: run.sha,
       workflow: jobsModel,
-      before: statusBefore,
+      sequence: begun.sequence,
+      checked: statusChecked,
       after: statusAfter,
       steps,
+      logStreams,
+      ...(deps.logs ? { logs: deps.logs } : {}),
       firstIteration: markStarted,
       terminal: actions.runStatus !== 'RUNNING',
     }),
@@ -429,25 +468,32 @@ function terminal(runStatus: RunItem['status']): DeciderOutput {
 }
 
 /**
- * Send the planned job-check upserts. Best-effort by design: checks are a
- * projection of run state onto GitHub, never an input to it, so neither a
- * table error nor a lost ownership race (a newer run owns the context) may
- * fail the iteration. The run-terminal pass rewrites every job, so a write
- * lost here is repaired at the latest when the run finishes.
+ * Send the planned job-check upserts and record on each job row which status
+ * its check now reflects. Best-effort by design: checks are a projection of
+ * run state onto GitHub, never an input to it, so neither a table error nor
+ * a lost ownership race (a newer run owns the context) may fail the
+ * iteration. A write that fails outright leaves `checkedStatus` untouched,
+ * so the next iteration retries it; a conditional drop is an answer (a newer
+ * run or a later iteration of this run owns the item) and is marked so the
+ * loop does not re-send it every minute. The run-terminal pass rewrites
+ * every job regardless, so a write lost here is repaired at the latest when
+ * the run finishes.
  */
 async function reportJobChecks(
   deps: DeciderDeps,
-  writes: readonly DesiredCheckWrite[],
+  coords: RunCoordinates,
+  planned: readonly PlannedJobCheck[],
   nowMs: number,
 ): Promise<void> {
-  for (const write of writes) {
+  for (const { job, status, write } of planned) {
     try {
       if (!(await deps.store.putDesiredCheck(write, nowMs))) {
-        deps.log('job check owned by a newer run; not updated', {
+        deps.log('job check owned by a newer run or a later iteration; not updated', {
           context: write.context,
           runId: write.ownerRun,
         });
       }
+      await deps.store.markJobChecked(coords, job, status);
     } catch (err) {
       deps.log('could not write job check', {
         context: write.context,
