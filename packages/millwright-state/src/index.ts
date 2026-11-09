@@ -232,6 +232,7 @@ export {
   desiredBootstrapSynthFailed,
   desiredBootstrapSynthSucceeded,
   desiredJobCheck,
+  desiredSynthCancelled,
   desiredSynthFailed,
   desiredSynthStarted,
   desiredSynthSucceeded,

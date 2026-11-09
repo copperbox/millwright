@@ -820,6 +820,31 @@ describe('synth check at run start (spec §13.2 lifecycle)', () => {
     expect(store.checks.every((c) => c.write.ownerRun === 'ci#1')).toBe(true);
   });
 
+  it('completes a superseded waiter’s check as cancelled — a run that never starts must not stay in_progress', async () => {
+    const { deps, store } = harness();
+    store.putRegistry('octocat/app', 'refs/heads/main', GATED);
+    await processBusEvent(deps, pushEvent(), NOW); // #1 running
+    await processBusEvent(deps, pushEvent({ sha: 'd'.repeat(40) }), NOW + 1000); // #2 queued
+    await processBusEvent(deps, pushEvent({ sha: 'e'.repeat(40) }), NOW + 2000); // #3 replaces #2
+
+    const second = store.checks.filter((c) => c.write.ownerRun === 'deploy#2');
+    expect(
+      second.map((c) => [c.write.sha, c.write.desired.status, c.write.desired.conclusion]),
+    ).toEqual([
+      ['d'.repeat(40), 'in_progress', undefined],
+      ['d'.repeat(40), 'completed', 'cancelled'],
+    ]);
+    expect(second[1].write).toMatchObject({ context: 'deploy / synth', ownerRunNumber: 2 });
+    const desired = parseDesiredCheckState(serializeDesiredCheckState(second[1].write.desired));
+    expect(desired.summary).toContain('deploy#2');
+    // The replacing run opened its own check and nothing else.
+    expect(
+      store.checks
+        .filter((c) => c.write.ownerRun === 'deploy#3')
+        .map((c) => c.write.desired.status),
+    ).toEqual(['in_progress']);
+  });
+
   it('never reopens the check for a rerun — reruns skip synth on an already-reported sha', async () => {
     const { deps, store, starter } = harness();
     store.putRegistry('octocat/app', 'refs/heads/main', CI_ONLY);

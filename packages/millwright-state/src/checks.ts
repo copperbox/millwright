@@ -233,6 +233,20 @@ export function desiredSynthFailed(runId: string, error: string): DesiredCheckSt
 }
 
 /**
+ * A run cancelled before its synth ever ran — a queued waiter superseded by
+ * a newer arrival in its concurrency group. Its check was opened at run
+ * start and must still reach a conclusion.
+ */
+export function desiredSynthCancelled(runId: string): DesiredCheckState {
+  return {
+    status: 'completed',
+    conclusion: 'cancelled',
+    title: 'Run cancelled before synth',
+    summary: `Run \`${runId}\`: superseded by a newer run in its concurrency group before synth ran.`,
+  };
+}
+
+/**
  * Bootstrap (`synth-only`) executions have no run to name: the repo-level
  * `millwright / synth` check (spec §B2) reports the sha it validated.
  */

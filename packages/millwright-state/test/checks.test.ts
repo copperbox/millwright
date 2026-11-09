@@ -12,6 +12,7 @@ import {
   desiredBootstrapSynthFailed,
   desiredBootstrapSynthSucceeded,
   desiredJobCheck,
+  desiredSynthCancelled,
   desiredSynthFailed,
   desiredSynthStarted,
   desiredSynthSucceeded,
@@ -150,6 +151,13 @@ describe('synth check content (spec §13.2 content)', () => {
     const desired = desiredSynthFailed('ci#142', 'workflows.ts:12 unknown trigger "pushh"');
     expect(desired).toMatchObject({ status: 'completed', conclusion: 'failure' });
     expect(desired.summary).toContain('workflows.ts:12 unknown trigger "pushh"');
+  });
+
+  it('a run cancelled before synth completes cancelled and round-trips the serialization', () => {
+    const desired = desiredSynthCancelled('deploy#2');
+    expect(desired).toMatchObject({ status: 'completed', conclusion: 'cancelled' });
+    expect(desired.summary).toContain('deploy#2');
+    expect(parseDesiredCheckState(serializeDesiredCheckState(desired))).toEqual(desired);
   });
 
   it('bootstrap outcomes name the sha instead of a run and round-trip the serialization', () => {

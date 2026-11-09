@@ -9,6 +9,7 @@ import {
   RunItem,
   TERMINAL_RUN_STATUSES,
   ValidBusEvent,
+  desiredSynthCancelled,
   desiredSynthStarted,
   formatRunId,
   jobOutputPrefix,
@@ -298,6 +299,47 @@ async function openSynthCheck(deps: LauncherDeps, run: RunItem, nowMs: number): 
 }
 
 /**
+ * A pending waiter replaced by a newer arrival is CANCELLED (reason
+ * superseded) without ever executing, so nothing downstream completes the
+ * synth check `openSynthCheck` opened for it. Close it `cancelled` here under
+ * the same owner; a newer run already owning the context drops the write.
+ * Reruns never opened one and are left alone. Best-effort, like the open.
+ */
+async function closeSupersededSynthCheck(
+  deps: LauncherDeps,
+  coords: RunCoordinates,
+  nowMs: number,
+): Promise<void> {
+  const runId = formatRunId(coords);
+  try {
+    const replaced = await deps.store.getRun(coords);
+    if (!replaced || replaced.rerunOf) {
+      return;
+    }
+    const label = `${replaced.workflow}#${replaced.runNumber}`;
+    const written = await deps.store.putDesiredCheck(
+      {
+        repo: replaced.repo,
+        sha: replaced.sha,
+        context: synthCheckContext(replaced.workflow),
+        ownerRun: label,
+        ownerRunNumber: replaced.runNumber,
+        desired: desiredSynthCancelled(label),
+      },
+      nowMs,
+    );
+    if (!written) {
+      deps.log('superseded run’s synth check owned by a newer run; not closed', { runId });
+    }
+  } catch (err) {
+    deps.log('could not close the superseded run’s synth check', {
+      runId,
+      error: (err as Error).message,
+    });
+  }
+}
+
+/**
  * The rerun path (spec §7.7): resolve the source run, compute the reuse set
  * for `--failed`, create the new run (fresh number, `rerunOf`) from the
  * STORED model, prefix-copy the model/source and reused outputs, then gate
@@ -511,6 +553,9 @@ async function gate(
     );
     if (claimed) {
       deps.log('run queued behind concurrency group', { group, runId: me, replaced: state?.pending });
+      if (state?.pending) {
+        await closeSupersededSynthCheck(deps, parseRunId(state.pending), nowMs);
+      }
       return 'queued';
     }
   }
